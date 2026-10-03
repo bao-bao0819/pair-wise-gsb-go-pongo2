@@ -69,7 +69,9 @@ type tagMacroNode struct {
 // Execute registers the macro as a callable function in the private context.
 // The macro can then be called like {{ macro_name(args) }}.
 func (node *tagMacroNode) Execute(ctx *ExecutionContext, writer TemplateWriter) error {
-	ctx.Private[node.name] = func(args ...*Value) (*Value, error) {
+	// The first (implicit) parameter receives the execution context of the
+	// call site, e.g. to pick up a {% call %} block's pending callback.
+	ctx.Private[node.name] = func(execCtx *ExecutionContext, args ...*Value) (*Value, error) {
 		ctx.macroDepth++
 		defer func() {
 			ctx.macroDepth--
@@ -79,7 +81,7 @@ func (node *tagMacroNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 			return nil, ctx.Error(fmt.Sprintf("maximum recursive macro call depth reached (max is %v)", maxMacroDepth), node.position)
 		}
 
-		return node.call(ctx, args...)
+		return node.call(ctx, execCtx, args...)
 	}
 
 	return nil
@@ -87,7 +89,9 @@ func (node *tagMacroNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 
 // call executes the macro body with the provided arguments and returns the
 // rendered output as a safe value. It creates an isolated context for execution.
-func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, error) {
+// ctx is the context the macro was registered in; execCtx is the context of
+// this particular invocation.
+func (node *tagMacroNode) call(ctx, execCtx *ExecutionContext, args ...*Value) (*Value, error) {
 	argsCtx := make(Context)
 
 	for k, v := range node.args {
@@ -122,6 +126,19 @@ func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, e
 
 	for idx, argValue := range args {
 		macroCtx.Private[node.argsOrder[idx]] = argValue.Interface()
+	}
+
+	// A {% call %} tag hands its block over through the private context of
+	// the invocation site. Promote it to a callable "caller" for this macro
+	// invocation only, so it neither leaks into nested macro calls nor
+	// shadows a declared "caller" argument of the macro.
+	if pending, ok := execCtx.Private[pendingCallerKey].(*tagCallerValue); ok {
+		if _, declared := node.args["caller"]; !declared {
+			macroCtx.Private["caller"] = pending.bind(node)
+		}
+	} else if _, ok := macroCtx.Private["caller"].(macroCallerFunc); ok {
+		// Don't leak an outer {% call %} callback into nested macro calls.
+		delete(macroCtx.Private, "caller")
 	}
 
 	var b bytes.Buffer

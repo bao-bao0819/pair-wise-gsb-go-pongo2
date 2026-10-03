@@ -286,6 +286,65 @@ pongo2 limits macro recursion depth to **1000 calls** to prevent infinite loops.
 maximum recursive macro call depth reached (max is 1000)
 ```
 
+## Call Blocks (Passing a Block to a Macro)
+
+Use the `{% call %}` tag to pass a template block to a macro as a callback.
+Inside the macro, the block is available as the special variable `caller`.
+This is useful when the macro provides a reusable frame (e.g. a table with
+borders) and the caller decides how each row is rendered.
+
+### Syntax
+
+```django
+{% call(param1, param2, ...) macro_or_callable(arg1, arg2, ...) %}
+  ...block body...
+{% endcall %}
+```
+
+The parameter list is optional; omit it (and the parentheses) for a
+parameterless block.
+
+### Example
+
+```django
+{% macro render_table(items) %}
+  <table>
+  {% for item in items %}{{ caller(item) }}{% endfor %}
+  </table>
+{% endmacro %}
+
+{% call(item) render_table(users) %}
+  <tr><td>{{ item.name }}</td></tr>
+{% endcall %}
+```
+
+The macro invokes `caller(item)` once per user; each invocation renders the
+block body with `item` bound to the given value.
+
+### Scoping Rules
+
+- The block body sees the variables of the context where the `{% call %}`
+  tag is **declared**, not the macro's local variables. A variable inside
+  the macro that happens to have the same name does not leak into the block.
+- The `caller` parameters are bound only for the duration of that single
+  callback invocation and do not leak into the surrounding template.
+- The macro may invoke `caller` multiple times; parameters are re-bound on
+  every invocation.
+- `{% call %}` blocks can be nested, and imported macros can call back into
+  `caller` as well.
+- If the macro declares an argument named `caller`, the explicit argument
+  wins and no callback is bound.
+
+### Errors and Limits
+
+- Calling `caller` with the wrong number of arguments returns an error that
+  references both template positions (the `{% call %}` block and the macro
+  definition).
+- Callback invocations count towards the recursive macro call depth limit
+  (1000), just like regular macro calls.
+- Autoescaping works inside the block body as usual; like macros, the
+  rendered block is returned to the macro as a safe string.
+
 ## Return Value
 
 Macros return their rendered content as a **safe string** (HTML is not escaped):
