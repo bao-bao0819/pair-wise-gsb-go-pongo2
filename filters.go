@@ -10,6 +10,19 @@ type FilterFunction func(in *Value, param *Value) (out *Value, err error)
 
 var builtinFilters = make(map[string]FilterFunction)
 
+// undefinedAwareFilters lists filters that intentionally accept an undefined
+// value as their input instead of raising an error in strict undefined mode.
+// The "default"/"default_if_none" filters provide fallbacks, and
+// "is_defined"/"is_undefined" implement the explicit definedness checks. Every
+// other filter is rejected up front so it cannot silently turn the undefined
+// sentinel into a zero value.
+var undefinedAwareFilters = map[string]struct{}{
+	"default":         {},
+	"default_if_none": {},
+	"is_defined":      {},
+	"is_undefined":    {},
+}
+
 // copyFilters creates a shallow copy of a filter map.
 func copyFilters(src map[string]FilterFunction) map[string]FilterFunction {
 	dst := make(map[string]FilterFunction, len(src))
@@ -93,11 +106,31 @@ func (fc *filterCall) Execute(v *Value, ctx *ExecutionContext) (*Value, error) {
 		param = AsValue(nil)
 	}
 
+	if err := checkFilterUndefined(fc.name, v, param); err != nil {
+		return nil, updateErrorToken(err, ctx.template, fc.token)
+	}
+
 	filteredValue, err := fc.filterFunc(v, param)
 	if err != nil {
 		return nil, updateErrorToken(err, ctx.template, fc.token)
 	}
 	return filteredValue, nil
+}
+
+// checkFilterUndefined rejects undefined inputs and parameters for filters
+// that do not intentionally handle undefined values. This is the single
+// chokepoint ensuring no filter silently converts the undefined sentinel into
+// a zero/empty value.
+func checkFilterUndefined(name string, values ...*Value) error {
+	if _, aware := undefinedAwareFilters[name]; aware {
+		return nil
+	}
+	for _, v := range values {
+		if v != nil && v.IsUndefined() {
+			return undefinedConsumptionError(v, "pass to the filter '"+name+"'")
+		}
+	}
+	return nil
 }
 
 // Filter = IDENT | IDENT ":" FilterArg | IDENT "|" Filter

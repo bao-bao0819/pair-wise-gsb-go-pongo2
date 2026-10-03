@@ -99,6 +99,11 @@ func (node *tagForNode) Execute(ctx *ExecutionContext, writer TemplateWriter) (f
 	if err != nil {
 		return err
 	}
+	if obj.IsUndefined() {
+		return forCtx.OrigError(
+			undefinedConsumptionError(obj, "iterate over"),
+			node.objectEvaluator.GetPositionToken())
+	}
 
 	obj.IterateOrder(func(idx, count int, key, value *Value) bool {
 		// There's something to iterate over (correct type and at least 1 item)

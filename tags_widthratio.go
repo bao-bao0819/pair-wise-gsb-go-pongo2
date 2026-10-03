@@ -66,6 +66,18 @@ func (node *tagWidthratioNode) Execute(ctx *ExecutionContext, writer TemplateWri
 		return err
 	}
 
+	for name, operand := range map[string]*Value{
+		"current_value": current,
+		"max_value":     max,
+		"max_width":     width,
+	} {
+		if operand.IsUndefined() {
+			return ctx.OrigError(
+				undefinedConsumptionError(operand, "use "+name+" of widthratio"),
+				node.position)
+		}
+	}
+
 	var value int
 	maxFloat := max.Float()
 	if maxFloat == 0 {

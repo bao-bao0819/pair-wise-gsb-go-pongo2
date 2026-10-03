@@ -13,6 +13,12 @@ import (
 type Value struct {
 	val  reflect.Value
 	safe bool // used to indicate whether a Value needs explicit escaping in the template
+
+	// undef is non-nil for "undefined" values produced by a missing root
+	// variable, map key or struct field when Options.StrictUndefined is
+	// enabled. Such values keep carrying their full access path while chained
+	// access extends it. AsValue/AsSafeValue always produce defined values.
+	undef *undefinedInfo
 }
 
 // AsValue converts any given value to a pongo2.Value
@@ -88,8 +94,15 @@ func (v *Value) IsTime() bool {
 	return ok
 }
 
-// IsNil checks whether the underlying value is NIL
+// IsNil checks whether the underlying value is NIL.
+//
+// An undefined value (a missing variable/key/field in strict undefined mode)
+// is not considered nil: use IsUndefined to distinguish it from an explicit
+// nil.
 func (v *Value) IsNil() bool {
+	if v.IsUndefined() {
+		return false
+	}
 	// fmt.Printf("%+v\n", v.getResolvedValue().Type().String())
 	return !v.getResolvedValue().IsValid()
 }
@@ -228,6 +241,9 @@ func (v *Value) Time() time.Time {
 //
 // Otherwise returns always FALSE.
 func (v *Value) IsTrue() bool {
+	if v.IsUndefined() {
+		return false
+	}
 	rv := v.getResolvedValue()
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -256,6 +272,9 @@ func (v *Value) IsTrue() bool {
 //
 //	AsValue(1).Negate().IsTrue() == false
 func (v *Value) Negate() *Value {
+	if v.IsUndefined() {
+		return AsValue(true)
+	}
 	rv := v.getResolvedValue()
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -513,7 +532,7 @@ func (v *Value) IterateOrder(fn func(idx, count int, key, value *Value) bool, em
 
 		itemCount := rv.Len()
 		for i := range itemCount {
-			items = append(items, &Value{val: rv.Index(i)})
+			items = append(items, wrapSliceItem(rv.Index(i)))
 		}
 
 		if sorted {
@@ -595,7 +614,15 @@ func (v *Value) EqualValueTo(other *Value) bool {
 	if v.IsTime() && other.IsTime() {
 		return v.Time().Equal(other.Time())
 	}
-	// Handle nil/undefined values (see issue #341)
+	// Undefined values (strict undefined mode) only equal other undefined
+	// values with the same access path.
+	if v.IsUndefined() || other.IsUndefined() {
+		if !v.IsUndefined() || !other.IsUndefined() {
+			return false
+		}
+		return v.UndefinedPath() == other.UndefinedPath()
+	}
+	// Handle nil values (see issue #341)
 	// Two nil values are considered equal
 	if !v.val.IsValid() && !other.val.IsValid() {
 		return true
@@ -613,6 +640,17 @@ func (v *Value) EqualValueTo(other *Value) bool {
 }
 
 type sortedKeys []reflect.Value
+
+// wrapSliceItem wraps an indexed slice/array element. Elements that are
+// themselves *Value (as produced by in-template array literals such as
+// [a, b]) are unwrapped so their metadata (safety flag, undefined status)
+// survives iteration.
+func wrapSliceItem(item reflect.Value) *Value {
+	if item.Type() == typeOfValuePtr {
+		return item.Interface().(*Value)
+	}
+	return &Value{val: item}
+}
 
 func (sk sortedKeys) Len() int {
 	return len(sk)

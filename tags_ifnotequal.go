@@ -38,6 +38,13 @@ func (node *tagIfNotEqualNode) Execute(ctx *ExecutionContext, writer TemplateWri
 		return err
 	}
 
+	if err := ensureDefined(r1, node.var1.GetPositionToken(), ctx, "compare in ifnotequal"); err != nil {
+		return err
+	}
+	if err := ensureDefined(r2, node.var2.GetPositionToken(), ctx, "compare in ifnotequal"); err != nil {
+		return err
+	}
+
 	result := !r1.EqualValueTo(r2)
 
 	if result {

@@ -229,6 +229,28 @@ With TrimBlocks: `Hello\n`
 With LStripBlocks: `\nHello\n`
 With both: `Hello\n`
 
+### StrictUndefined
+
+By default, a missing variable, map key or struct field renders as an empty
+string (Django-compatible lenient behavior). Enable `StrictUndefined` to make
+such accesses produce an *undefined* value carrying the full access path:
+
+```go
+set.Options.StrictUndefined = true
+```
+
+An undefined value is falsy, so plain `{% if user.name %}` checks keep
+working. Consuming it through output, arithmetic, comparisons or iteration
+returns an execution error reporting the template position and the missing
+path. The message identifies the concrete missing step, so
+`{{ user.profile.name }}` distinguishes "`profile` is missing" from
+"`name` is missing".
+
+Explicit `nil`, `false`, `0` and empty strings remain defined values. Handle
+undefined values intentionally with the `default`/`default_if_none` filters,
+or test them with `is_defined`/`is_undefined`. Short-circuited `and`/`or`
+branches that are not evaluated never raise an error.
+
 ## Global Variables
 
 Variables available to all templates in a set:

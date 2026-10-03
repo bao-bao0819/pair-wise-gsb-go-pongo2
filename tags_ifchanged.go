@@ -108,6 +108,11 @@ func (node *tagIfchangedNode) Execute(ctx *ExecutionContext, writer TemplateWrit
 			if err != nil {
 				return err
 			}
+			if val.IsUndefined() {
+				return ctx.OrigError(
+					undefinedConsumptionError(val, "compare in ifchanged"),
+					expr.GetPositionToken())
+			}
 			nowValues = append(nowValues, val)
 		}
 

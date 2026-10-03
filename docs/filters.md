@@ -457,6 +457,25 @@ Returns the argument only if value is nil.
 {{ 0|default_if_none:"zero" }}  {# 0 (not replaced) #}
 ```
 
+### is_defined
+
+Returns `true` if the value is defined, `false` if it is undefined in strict
+undefined mode (see `Options.StrictUndefined`). Explicit `nil`, `false`, `0`
+and empty strings are defined.
+
+```django
+{% if user.name|is_defined %}{{ user.name }}{% endif %}
+```
+
+### is_undefined
+
+Inverse of `is_defined`: returns `true` for a missing variable, map key or
+struct field in strict undefined mode.
+
+```django
+{% if user.name|is_undefined %}name is missing{% endif %}
+```
+
 ## Boolean Filters
 
 ### yesno

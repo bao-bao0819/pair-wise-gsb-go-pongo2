@@ -161,9 +161,21 @@ func (expr *relationalExpression) Evaluate(ctx *ExecutionContext) (*Value, error
 		return nil, err
 	}
 	if expr.expr2 != nil {
+		// "in" is a definitional membership test (key in map) and therefore
+		// tolerates undefined operands; all other comparisons consume them.
+		if expr.opToken.Val != "in" {
+			if err := ensureDefined(v1, expr.expr1.GetPositionToken(), ctx, "compare"); err != nil {
+				return nil, err
+			}
+		}
 		v2, err := expr.expr2.Evaluate(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if expr.opToken.Val != "in" {
+			if err := ensureDefined(v2, expr.expr2.GetPositionToken(), ctx, "compare"); err != nil {
+				return nil, err
+			}
 		}
 		switch expr.opToken.Val {
 		case "<=":
@@ -230,6 +242,9 @@ func (expr *simpleExpression) Evaluate(ctx *ExecutionContext) (*Value, error) {
 	result := t1
 
 	if expr.negativeSign {
+		if err := ensureDefined(result, expr.GetPositionToken(), ctx, "negate"); err != nil {
+			return nil, err
+		}
 		if result.IsNumber() {
 			switch {
 			case result.IsFloat():
@@ -247,6 +262,16 @@ func (expr *simpleExpression) Evaluate(ctx *ExecutionContext) (*Value, error) {
 	if expr.term2 != nil {
 		t2, err := expr.term2.Evaluate(ctx)
 		if err != nil {
+			return nil, err
+		}
+		action := "add"
+		if expr.opToken.Val == "-" {
+			action = "subtract"
+		}
+		if err := ensureDefined(t2, expr.term2.GetPositionToken(), ctx, action); err != nil {
+			return nil, err
+		}
+		if err := ensureDefined(result, expr.term1.GetPositionToken(), ctx, action); err != nil {
 			return nil, err
 		}
 		switch expr.opToken.Val {
@@ -284,6 +309,19 @@ func (expr *term) Evaluate(ctx *ExecutionContext) (*Value, error) {
 	if expr.factor2 != nil {
 		f2, err := expr.factor2.Evaluate(ctx)
 		if err != nil {
+			return nil, err
+		}
+		action := "multiply"
+		switch expr.opToken.Val {
+		case "/":
+			action = "divide"
+		case "%":
+			action = "compute the modulo of"
+		}
+		if err := ensureDefined(f1, expr.factor1.GetPositionToken(), ctx, action); err != nil {
+			return nil, err
+		}
+		if err := ensureDefined(f2, expr.factor2.GetPositionToken(), ctx, action); err != nil {
 			return nil, err
 		}
 		switch expr.opToken.Val {
@@ -332,6 +370,12 @@ func (expr *power) Evaluate(ctx *ExecutionContext) (*Value, error) {
 	if expr.power2 != nil {
 		p2, err := expr.power2.Evaluate(ctx)
 		if err != nil {
+			return nil, err
+		}
+		if err := ensureDefined(p1, expr.power1.GetPositionToken(), ctx, "raise to a power"); err != nil {
+			return nil, err
+		}
+		if err := ensureDefined(p2, expr.power2.GetPositionToken(), ctx, "raise to a power"); err != nil {
 			return nil, err
 		}
 		return AsValue(math.Pow(p1.Float(), p2.Float())), nil

@@ -226,6 +226,8 @@ func init() {
 
 	mustRegisterFilter("float", filterFloat)     // pongo-specific
 	mustRegisterFilter("integer", filterInteger) // pongo-specific
+	mustRegisterFilter("is_defined", filterIsDefined)
+	mustRegisterFilter("is_undefined", filterIsUndefined)
 }
 
 const ellipsis = "…"
@@ -795,10 +797,31 @@ func filterDefault(in *Value, param *Value) (*Value, error) {
 // If value is 0, output: 0 (unlike default filter)
 // If value is "", output: "" (unlike default filter)
 func filterDefaultIfNone(in *Value, param *Value) (*Value, error) {
-	if in.IsNil() {
+	if in.IsNil() || in.IsUndefined() {
 		return param, nil
 	}
 	return in, nil
+}
+
+// filterIsDefined reports whether the value is defined. It is one of the few
+// filters that intentionally accept undefined values (see Options.StrictUndefined).
+//
+// Usage:
+//
+//	{% if user.profile.name|is_defined %}{{ user.profile.name }}{% endif %}
+func filterIsDefined(in *Value, param *Value) (*Value, error) {
+	return AsValue(in.IsDefined()), nil
+}
+
+// filterIsUndefined reports whether the value is missing in strict undefined
+// mode. Explicit nil, false, 0 and empty strings are defined and therefore
+// return false.
+//
+// Usage:
+//
+//	{% if user.profile.name|is_undefined %}name is missing{% endif %}
+func filterIsUndefined(in *Value, param *Value) (*Value, error) {
+	return AsValue(in.IsUndefined()), nil
 }
 
 // filterDivisibleby returns true if the value is divisible by the argument.

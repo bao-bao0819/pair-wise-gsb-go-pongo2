@@ -526,7 +526,7 @@ func TestUnpackValue(t *testing.T) {
 
 	t.Run("non-Value passthrough", func(t *testing.T) {
 		input := reflect.ValueOf(42)
-		result, isSafe := vr.unpackValue(input, false)
+		result, isSafe, _ := vr.unpackValue(input, false, nil)
 		if !reflect.DeepEqual(input.Interface(), result.Interface()) {
 			t.Errorf("expected %v, got %v", input, result)
 		}
@@ -537,7 +537,7 @@ func TestUnpackValue(t *testing.T) {
 
 	t.Run("preserves isSafe when not unpacking", func(t *testing.T) {
 		input := reflect.ValueOf("string")
-		result, isSafe := vr.unpackValue(input, true)
+		result, isSafe, _ := vr.unpackValue(input, true, nil)
 		if !reflect.DeepEqual(input.Interface(), result.Interface()) {
 			t.Errorf("expected %v, got %v", input, result)
 		}
@@ -549,7 +549,7 @@ func TestUnpackValue(t *testing.T) {
 	t.Run("unpacks Value", func(t *testing.T) {
 		val := AsValue("inner")
 		input := reflect.ValueOf(val)
-		result, isSafe := vr.unpackValue(input, false)
+		result, isSafe, _ := vr.unpackValue(input, false, nil)
 		if result.Interface() != val.val.Interface() {
 			t.Errorf("expected %v, got %v", val.val, result)
 		}
@@ -561,7 +561,7 @@ func TestUnpackValue(t *testing.T) {
 	t.Run("unpacks safe Value", func(t *testing.T) {
 		val := AsSafeValue("safe inner")
 		input := reflect.ValueOf(val)
-		result, isSafe := vr.unpackValue(input, false)
+		result, isSafe, _ := vr.unpackValue(input, false, nil)
 		if result.Interface() != val.val.Interface() {
 			t.Errorf("expected %v, got %v", val.val, result)
 		}

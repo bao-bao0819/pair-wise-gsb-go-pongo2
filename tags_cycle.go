@@ -72,6 +72,9 @@ func (node *tagCycleNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 	if err != nil {
 		return err
 	}
+	if val.IsUndefined() {
+		return ctx.OrigError(undefinedConsumptionError(val, "render in a cycle"), item.GetPositionToken())
+	}
 
 	if t, ok := val.Interface().(*tagCycleValue); ok {
 		// {% cycle cycleitem %} — advance the referenced cycle node
@@ -81,6 +84,9 @@ func (node *tagCycleNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 		val, err := item.Evaluate(ctx)
 		if err != nil {
 			return err
+		}
+		if val.IsUndefined() {
+			return ctx.OrigError(undefinedConsumptionError(val, "render in a cycle"), item.GetPositionToken())
 		}
 
 		t.value = val

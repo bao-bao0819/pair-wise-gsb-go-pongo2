@@ -76,6 +76,9 @@ func (node *tagFilterNode) Execute(ctx *ExecutionContext, writer TemplateWriter)
 		} else {
 			param = AsValue(nil)
 		}
+		if err := checkFilterUndefined(call.name, value, param); err != nil {
+			return ctx.OrigError(err, node.position)
+		}
 		value, err = ctx.template.set.ApplyFilter(call.name, value, param)
 		if err != nil {
 			return ctx.Error(err.Error(), node.position)

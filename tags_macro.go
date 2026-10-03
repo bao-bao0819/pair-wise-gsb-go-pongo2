@@ -88,12 +88,14 @@ func (node *tagMacroNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 // call executes the macro body with the provided arguments and returns the
 // rendered output as a safe value. It creates an isolated context for execution.
 func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, error) {
-	argsCtx := make(Context)
+	// privateArgs keeps the original *Value of the provided arguments so that
+	// undefined values reach the macro body instead of being converted to nil.
+	privateArgs := make(Context)
 
 	for k, v := range node.args {
 		if v == nil {
 			// User did not provided a default value
-			argsCtx[k] = nil
+			privateArgs[k] = AsValue(nil)
 		} else {
 			// Evaluate the default value
 			valueExpr, err := v.Evaluate(ctx)
@@ -102,7 +104,7 @@ func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, e
 				return AsSafeValue(""), err
 			}
 
-			argsCtx[k] = valueExpr.Interface()
+			privateArgs[k] = valueExpr
 		}
 	}
 
@@ -117,12 +119,12 @@ func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, e
 	// Make a context for the macro execution
 	macroCtx := NewChildExecutionContext(ctx)
 
-	// Register all arguments in the private context
-	macroCtx.Private.Update(argsCtx)
-
 	for idx, argValue := range args {
-		macroCtx.Private[node.argsOrder[idx]] = argValue.Interface()
+		privateArgs[node.argsOrder[idx]] = argValue
 	}
+
+	// Register all arguments in the private context
+	macroCtx.Private.Update(privateArgs)
 
 	var b bytes.Buffer
 	err := node.wrapper.Execute(macroCtx, &b)
