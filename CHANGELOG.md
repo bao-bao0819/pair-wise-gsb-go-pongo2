@@ -4,6 +4,15 @@
 
 This release brings pongo2 significantly closer to Django template behavior.
 
+### Features
+
+- **`{% call %}` tag**: Pass a template block to a macro as a `caller` callback
+  (Jinja2-style call blocks). The macro invokes the block via `{{ caller(...) }}`;
+  the block body sees the variables of the `{% call %}` declaration site, caller
+  parameters apply only during that invocation, and macro temporaries stay
+  invisible. Works with imported macros, nesting, and multiple `caller` calls;
+  argument-count mismatches report both template positions.
+
 ### Backwards-Incompatible Fixes
 
 - **`timesince`/`timeuntil`**: Rewritten to use calendar-based month/year arithmetic and Django's adjacency rule (only adjacent time units shown). Future dates return "0&nbsp;minutes" for `timesince`, past dates for `timeuntil`.

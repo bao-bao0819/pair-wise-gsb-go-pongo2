@@ -79,6 +79,7 @@ Template String → Lexer → Tokens → Parser → AST → Execute → Output
 {% extends "base.html" %}
 {% include "partial.html" %}
 {% macro name(args) %}...{% endmacro %}
+{% call(params) name(args) %}...{% endcall %}
 ```
 
 ### Comments
@@ -180,7 +181,7 @@ JSON: `json_script`
 ## Built-in Tags
 
 Control: `if`/`elif`/`else`, `for`/`empty`, `with`
-Template: `extends`, `block`, `include`, `import`, `macro`
+Template: `extends`, `block`, `include`, `import`, `macro`, `call`
 Output: `autoescape`, `filter`, `spaceless`, `verbatim`
 Misc: `set`, `comment`, `cycle`, `firstof`, `now`, `lorem`
 

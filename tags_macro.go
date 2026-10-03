@@ -68,18 +68,14 @@ type tagMacroNode struct {
 
 // Execute registers the macro as a callable function in the private context.
 // The macro can then be called like {{ macro_name(args) }}.
+//
+// The registered function takes the call-site *ExecutionContext as its first
+// parameter (injected by the expression evaluator). This allows the macro to
+// pick up a call-block caller ({% call %}) provided at the call site while
+// still executing its body in a child of the definition-site context.
 func (node *tagMacroNode) Execute(ctx *ExecutionContext, writer TemplateWriter) error {
-	ctx.Private[node.name] = func(args ...*Value) (*Value, error) {
-		ctx.macroDepth++
-		defer func() {
-			ctx.macroDepth--
-		}()
-
-		if ctx.macroDepth > maxMacroDepth {
-			return nil, ctx.Error(fmt.Sprintf("maximum recursive macro call depth reached (max is %v)", maxMacroDepth), node.position)
-		}
-
-		return node.call(ctx, args...)
+	ctx.Private[node.name] = func(callSiteCtx *ExecutionContext, args ...*Value) (*Value, error) {
+		return node.call(ctx, callSiteCtx, args...)
 	}
 
 	return nil
@@ -87,7 +83,20 @@ func (node *tagMacroNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 
 // call executes the macro body with the provided arguments and returns the
 // rendered output as a safe value. It creates an isolated context for execution.
-func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, error) {
+//
+// ctx is the definition-site (or import-site) context the macro closes over;
+// callSiteCtx is the context at the place the macro is invoked and may carry
+// a call-block caller under callBlockCallerContextKey (it may be nil).
+func (node *tagMacroNode) call(ctx, callSiteCtx *ExecutionContext, args ...*Value) (*Value, error) {
+	*ctx.macroDepth++
+	defer func() {
+		*ctx.macroDepth--
+	}()
+
+	if *ctx.macroDepth > maxMacroDepth {
+		return nil, ctx.Error(fmt.Sprintf("maximum recursive macro call depth reached (max is %v)", maxMacroDepth), node.position)
+	}
+
 	argsCtx := make(Context)
 
 	for k, v := range node.args {
@@ -116,6 +125,14 @@ func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, e
 
 	// Make a context for the macro execution
 	macroCtx := NewChildExecutionContext(ctx)
+
+	// If the macro is invoked through a {% call %} block, the caller is
+	// available inside the macro body as "caller".
+	if callSiteCtx != nil {
+		if caller, ok := callSiteCtx.Private[callBlockCallerContextKey]; ok {
+			macroCtx.Private["caller"] = caller
+		}
+	}
 
 	// Register all arguments in the private context
 	macroCtx.Private.Update(argsCtx)

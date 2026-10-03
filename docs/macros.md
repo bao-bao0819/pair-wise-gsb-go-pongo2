@@ -129,6 +129,75 @@ Arguments without defaults are required. If not provided, they will be `nil`:
 {{ required_example("value", optional_arg="custom") }}
 ```
 
+## Call Blocks
+
+Sometimes a macro should provide the outer structure while the *caller*
+decides how the inner content is rendered - for example, a macro that draws
+a table's borders while each caller defines what a row looks like. The
+`{% call %}` tag does exactly this: it invokes a macro and passes its block
+body to the macro as a callback named `caller`.
+
+```django
+{% macro email_table(rows) %}
+  <table border="1">
+  {% for row in rows %}
+    <tr>{{ caller(row) }}</tr>
+  {% endfor %}
+  </table>
+{% endmacro %}
+
+{% call(item) email_table(users) %}
+  <td>{{ item.name }}</td><td>{{ item.email }}</td>
+{% endcall %}
+```
+
+### Syntax
+
+```django
+{% call(param1, param2, ...) macro_or_callable(arg1, arg2, ...) %}
+  ...body...
+{% endcall %}
+```
+
+- The parenthesized list after `call` declares the parameters of the
+  callback. It is optional and may be omitted (or left empty) if the
+  callback takes no arguments.
+- Inside the macro, the callback is available as the variable `caller`
+  and is invoked like a function: `{{ caller(value) }}`.
+- The macro may invoke `caller` any number of times (including zero).
+
+### Scoping Rules
+
+- The body reads variables from the place where the `{% call %}` tag is
+  written (e.g. surrounding loop variables), never from the macro.
+- Caller parameters are bound only for the duration of that single
+  `caller(...)` invocation and shadow same-named outer variables.
+- Temporary variables of the macro are not visible inside the body.
+
+### Nesting and Imports
+
+`{% call %}` blocks may be nested, and macros imported with `{% import %}`
+can call back into the importing template's call-block:
+
+```django
+{# macros.html #}
+{% macro frame(title) export %}
+  <h1>{{ title }}</h1>
+  <div>{{ caller() }}</div>
+{% endmacro %}
+```
+
+```django
+{% import "macros.html" frame %}
+{% call frame("Hello") %}<p>{{ message }}</p>{% endcall %}
+```
+
+Each macro -> caller edge counts towards the recursive macro depth limit
+(1000), so runaway macro/caller recursion is aborted with an error.
+If the macro calls `caller(...)` with the wrong number of arguments, the
+error reports both the position of the `caller(...)` invocation inside the
+macro and the position of the `{% call %}` tag.
+
 ## Exporting Macros
 
 To use macros across multiple templates, mark them with `export`:

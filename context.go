@@ -71,7 +71,9 @@ type ExecutionContext struct {
 	template *Template
 
 	// Tracks recursive macro call depth; errors if exceeding maxMacroDepth.
-	macroDepth int
+	// It is a pointer so that all child contexts of a single render share
+	// the same counter (macro -> caller -> macro chains accumulate depth).
+	macroDepth *int
 
 	// When true, {{ variable }} output is HTML-escaped. Toggle with {% autoescape %}.
 	// The |safe filter bypasses escaping.
@@ -110,6 +112,7 @@ func newExecutionContext(tpl *Template, ctx Context) *ExecutionContext {
 	return &ExecutionContext{
 		template: tpl,
 
+		macroDepth: new(int),
 		Public:     ctx,
 		Private:    privateCtx,
 		Shared:     make(Context),
@@ -125,7 +128,8 @@ func newExecutionContext(tpl *Template, ctx Context) *ExecutionContext {
 // to create isolated scopes while maintaining access to the template's data.
 func NewChildExecutionContext(parent *ExecutionContext) *ExecutionContext {
 	newctx := &ExecutionContext{
-		template: parent.template,
+		template:   parent.template,
+		macroDepth: parent.macroDepth,
 
 		Public:     parent.Public,
 		Private:    make(Context),

@@ -248,6 +248,27 @@ Imports macros from another file.
 {{ btn("Click", "/") }}
 ```
 
+### call / endcall
+
+Invokes a macro and passes the block body to it as a `caller` callback.
+The macro renders the outer structure; the call-block defines how the
+inner content is drawn. See [Macros - Call Blocks](macros.md#call-blocks).
+
+```django
+{% macro table(rows) %}
+  <table>{% for row in rows %}<tr>{{ caller(row) }}</tr>{% endfor %}</table>
+{% endmacro %}
+
+{% call(item) table(users) %}
+  <td>{{ item.name }}</td>
+{% endcall %}
+```
+
+The optional parenthesized list after `call` declares the caller's
+parameters; it may be omitted if the caller takes no arguments. The body
+reads variables from the place where the `{% call %}` tag is written, and
+caller parameters only apply during that single callback invocation.
+
 ## Variable Tags
 
 ### set

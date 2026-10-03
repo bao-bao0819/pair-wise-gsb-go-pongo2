@@ -46,8 +46,8 @@ type tagImportNode struct {
 func (node *tagImportNode) Execute(ctx *ExecutionContext, writer TemplateWriter) error {
 	for name, macro := range node.macros {
 		func(name string, macro *tagMacroNode) {
-			ctx.Private[name] = func(args ...*Value) (*Value, error) {
-				return macro.call(ctx, args...)
+			ctx.Private[name] = func(callSiteCtx *ExecutionContext, args ...*Value) (*Value, error) {
+				return macro.call(ctx, callSiteCtx, args...)
 			}
 		}(name, macro)
 	}
