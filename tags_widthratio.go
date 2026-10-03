@@ -65,6 +65,11 @@ func (node *tagWidthratioNode) Execute(ctx *ExecutionContext, writer TemplateWri
 	if err != nil {
 		return err
 	}
+	for _, v := range []*Value{current, max, width} {
+		if err := checkUndefined(ctx, v, "widthratio", node.position); err != nil {
+			return err
+		}
+	}
 
 	var value int
 	maxFloat := max.Float()

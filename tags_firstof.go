@@ -40,6 +40,9 @@ func (node *tagFirstofNode) Execute(ctx *ExecutionContext, writer TemplateWriter
 		if err != nil {
 			return err
 		}
+		if val.IsUndefined() {
+			return ctx.OrigError(errUndefinedConsumed(val, "firstof"), arg.GetPositionToken())
+		}
 
 		if val.IsTrue() {
 			if ctx.Autoescape && !arg.FilterApplied("safe") {

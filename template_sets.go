@@ -201,6 +201,15 @@ func (set *TemplateSet) SetAutoescape(v bool) {
 	set.autoescape = v
 }
 
+// SetStrictUndefined enables or disables strict-undefined mode for templates
+// created by this set afterwards. In strict mode, missing variables, map keys
+// and struct fields resolve to an undefined value that errors only when
+// consumed, carrying the full access path. Must be called before parsing
+// templates (FromString/FromFile/FromCache), just like other set options.
+func (set *TemplateSet) SetStrictUndefined(v bool) {
+	set.Options.StrictUndefined = v
+}
+
 // ReplaceFilter replaces an already registered filter in this template set.
 // Use this function with caution since it allows you to change existing filter behaviour.
 func (set *TemplateSet) ReplaceFilter(name string, fn FilterFunction) error {

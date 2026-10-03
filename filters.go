@@ -80,6 +80,14 @@ type filterCall struct {
 	filterFunc FilterFunction
 }
 
+// undefinedAwareFilters are filters which intentionally accept an undefined
+// input value in strict-undefined mode (they provide fallbacks). Every other
+// filter must fail loudly instead of converting the undefined sentinel into a
+// zero value behind the caller's back.
+var undefinedAwareFilters = map[string]bool{
+	"default": true,
+}
+
 func (fc *filterCall) Execute(v *Value, ctx *ExecutionContext) (*Value, error) {
 	var param *Value
 	var err error
@@ -89,13 +97,27 @@ func (fc *filterCall) Execute(v *Value, ctx *ExecutionContext) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		// A filter argument is always consumed concretely; an undefined
+		// parameter cannot be silently turned into nil/zero.
+		if param.IsUndefined() {
+			return nil, ctx.OrigError(
+				errUndefinedConsumed(param, "argument of filter '"+fc.name+"'"), fc.token)
+		}
 	} else {
 		param = AsValue(nil)
+	}
+
+	if v.IsUndefined() && !undefinedAwareFilters[fc.name] {
+		return nil, ctx.OrigError(
+			errUndefinedConsumed(v, "filter '"+fc.name+"' input"), fc.token)
 	}
 
 	filteredValue, err := fc.filterFunc(v, param)
 	if err != nil {
 		return nil, updateErrorToken(err, ctx.template, fc.token)
+	}
+	if filteredValue == nil {
+		return nil, ctx.Error(fmt.Sprintf("filter '%s' returned nil", fc.name), fc.token)
 	}
 	return filteredValue, nil
 }

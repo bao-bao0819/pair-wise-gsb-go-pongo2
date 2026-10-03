@@ -13,6 +13,18 @@ import (
 type Value struct {
 	val  reflect.Value
 	safe bool // used to indicate whether a Value needs explicit escaping in the template
+
+	// An undefined value is produced in strict-undefined mode when a variable
+	// chain refers to a missing root variable, map key or struct field. It
+	// keeps track of the full access path so that failures can be reported at
+	// the point where the value is consumed (output, arithmetic, comparison,
+	// iteration or boolean tests). Explicit nil/false/0/"" values are never
+	// undefined.
+	undefined    bool
+	path         string // full access path, e.g. "user.profile.name"
+	origin       string // path up to (and including) the part that was missing
+	originReason string // what was missing (root variable, map key, field, ...)
+	originKind   undefinedOriginKind
 }
 
 // AsValue converts any given value to a pongo2.Value
@@ -34,6 +46,76 @@ func AsSafeValue(i any) *Value {
 		val:  reflect.ValueOf(i),
 		safe: true,
 	}
+}
+
+func newUndefinedValue(path, origin string, originKind undefinedOriginKind) *Value {
+	return &Value{
+		val:          reflect.Value{},
+		undefined:    true,
+		path:         path,
+		origin:       origin,
+		originReason: originKind.reason(origin),
+		originKind:   originKind,
+	}
+}
+
+type undefinedOriginKind int
+
+const (
+	undefinedRoot undefinedOriginKind = iota
+	undefinedField
+	undefinedKey
+	undefinedIndex
+	undefinedNilContainer
+)
+
+func (k undefinedOriginKind) reason(origin string) string {
+	switch k {
+	case undefinedRoot:
+		return fmt.Sprintf("root variable '%s' is not defined", origin)
+	case undefinedField:
+		return fmt.Sprintf("field '%s' does not exist", origin)
+	case undefinedKey:
+		return fmt.Sprintf("map key '%s' does not exist", origin)
+	case undefinedIndex:
+		return fmt.Sprintf("index '%s' is out of range", origin)
+	case undefinedNilContainer:
+		return fmt.Sprintf("'%s' is nil", origin)
+	default:
+		return fmt.Sprintf("'%s' is not defined", origin)
+	}
+}
+
+// IsUndefined reports whether the value is an undefined placeholder produced
+// in strict-undefined mode because a variable, map key or struct field was
+// missing. Explicit nil, false, 0 and "" are defined values.
+func (v *Value) IsUndefined() bool {
+	return v.undefined
+}
+
+// UndefinedPath returns the full access path of an undefined value
+// (e.g. "user.profile.name"). It returns an empty string for defined values.
+func (v *Value) UndefinedPath() string {
+	if !v.undefined {
+		return ""
+	}
+	return v.path
+}
+
+// UndefinedError returns the detailed error describing why the value is
+// undefined, including the origin of the miss and the full access path.
+func (v *Value) UndefinedError(action string) string {
+	if !v.undefined {
+		return ""
+	}
+	msg := v.originReason
+	if v.path != v.origin {
+		msg += fmt.Sprintf(" (accessed as %s)", v.path)
+	}
+	if action != "" {
+		msg = action + ": " + msg
+	}
+	return msg
 }
 
 func (v *Value) getResolvedValue() reflect.Value {
@@ -90,6 +172,11 @@ func (v *Value) IsTime() bool {
 
 // IsNil checks whether the underlying value is NIL
 func (v *Value) IsNil() bool {
+	if v.undefined {
+		// Undefined is not an explicit nil: filters like default_if_none must
+		// be able to tell them apart (whereas default treats both as falsy).
+		return false
+	}
 	// fmt.Printf("%+v\n", v.getResolvedValue().Type().String())
 	return !v.getResolvedValue().IsValid()
 }
@@ -332,7 +419,18 @@ func (v *Value) Index(i int) *Value {
 		if i < 0 || i >= rv.Len() {
 			return AsValue(nil)
 		}
-		return AsValue(rv.Index(i).Interface())
+		elem := rv.Index(i)
+		// Preserve *Value elements as-is so that an undefined element inside
+		// an array literal is not turned into a plain nil by indexing.
+		if elem.Kind() == reflect.Interface && !elem.IsNil() {
+			if inner, ok := elem.Interface().(*Value); ok {
+				return inner
+			}
+		}
+		if elem.Type() == typeOfValuePtr {
+			return elem.Interface().(*Value)
+		}
+		return AsValue(elem.Interface())
 	case reflect.String:
 		runes := []rune(rv.String())
 		if i < 0 || i >= len(runes) {

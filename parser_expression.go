@@ -20,7 +20,8 @@ type relationalExpression struct {
 }
 
 type notExpression struct {
-	expr IEvaluator
+	expr    IEvaluator
+	defined bool
 }
 
 type simpleExpression struct {
@@ -54,6 +55,9 @@ func (expr *relationalExpression) FilterApplied(name string) bool {
 }
 
 func (expr *notExpression) FilterApplied(name string) bool {
+	if expr.defined {
+		return false
+	}
 	return expr.expr.FilterApplied(name)
 }
 
@@ -165,6 +169,14 @@ func (expr *relationalExpression) Evaluate(ctx *ExecutionContext) (*Value, error
 		if err != nil {
 			return nil, err
 		}
+		// Comparisons consume concrete values; undefined operands must surface
+		// with their access path. Use the "defined" operator to test presence.
+		if err := checkUndefined(ctx, v1, "comparison", expr.opToken); err != nil {
+			return nil, err
+		}
+		if err := checkUndefined(ctx, v2, "comparison", expr.opToken); err != nil {
+			return nil, err
+		}
 		switch expr.opToken.Val {
 		case "<=":
 			if v1.IsFloat() || v2.IsFloat() {
@@ -219,6 +231,14 @@ func (expr *notExpression) Evaluate(ctx *ExecutionContext) (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
+	if expr.defined {
+		// Presence test: an undefined value reports false without being
+		// consumed; every other value (incl. nil/false/0/"") is defined.
+		return AsValue(!v.IsUndefined()), nil
+	}
+	if err := checkUndefined(ctx, v, "boolean test", expr.GetPositionToken()); err != nil {
+		return nil, err
+	}
 	return v.Negate(), nil
 }
 
@@ -230,6 +250,9 @@ func (expr *simpleExpression) Evaluate(ctx *ExecutionContext) (*Value, error) {
 	result := t1
 
 	if expr.negativeSign {
+		if err := checkUndefined(ctx, result, "arithmetic", expr.GetPositionToken()); err != nil {
+			return nil, err
+		}
 		if result.IsNumber() {
 			switch {
 			case result.IsFloat():
@@ -247,6 +270,12 @@ func (expr *simpleExpression) Evaluate(ctx *ExecutionContext) (*Value, error) {
 	if expr.term2 != nil {
 		t2, err := expr.term2.Evaluate(ctx)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkUndefined(ctx, result, "arithmetic", expr.opToken); err != nil {
+			return nil, err
+		}
+		if err := checkUndefined(ctx, t2, "arithmetic", expr.opToken); err != nil {
 			return nil, err
 		}
 		switch expr.opToken.Val {
@@ -284,6 +313,12 @@ func (expr *term) Evaluate(ctx *ExecutionContext) (*Value, error) {
 	if expr.factor2 != nil {
 		f2, err := expr.factor2.Evaluate(ctx)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkUndefined(ctx, f1, "arithmetic", expr.opToken); err != nil {
+			return nil, err
+		}
+		if err := checkUndefined(ctx, f2, "arithmetic", expr.opToken); err != nil {
 			return nil, err
 		}
 		switch expr.opToken.Val {
@@ -334,9 +369,45 @@ func (expr *power) Evaluate(ctx *ExecutionContext) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := checkUndefined(ctx, p1, "arithmetic", expr.GetPositionToken()); err != nil {
+			return nil, err
+		}
+		if err := checkUndefined(ctx, p2, "arithmetic", expr.GetPositionToken()); err != nil {
+			return nil, err
+		}
 		return AsValue(math.Pow(p1.Float(), p2.Float())), nil
 	}
 	return p1, nil
+}
+
+// matchName consumes the current token if its textual value matches name,
+// regardless of whether the lexer classified it as a keyword or identifier.
+// This is used for the "is defined" operator so that "is" and "defined" keep
+// being usable as ordinary variable names.
+func (p *Parser) matchName(name string) *Token {
+	if t := p.Current(); t != nil && t.Val == name &&
+		(t.Typ == TokenIdentifier || t.Typ == TokenKeyword) {
+		p.Consume()
+		return t
+	}
+	return nil
+}
+
+// matchNameFollowedBy matches name only when at least one more token follows,
+// so a name at the end of an expression stays an ordinary variable reference.
+func (p *Parser) matchNameFollowedBy(name string) *Token {
+	t := p.Current()
+	if t == nil || t.Val != name ||
+		(t.Typ != TokenIdentifier && t.Typ != TokenKeyword) {
+		return nil
+	}
+	next := p.Get(p.idx + 1)
+	if next == nil || next.Val == "}}" || next.Val == "%}" ||
+		next.Val == ")" || next.Val == "," {
+		return nil
+	}
+	p.Consume()
+	return t
 }
 
 func (p *Parser) parseFactor() (IEvaluator, error) {
@@ -494,8 +565,41 @@ func (p *Parser) parseRelationalExpression() (IEvaluator, error) {
 }
 
 func (p *Parser) parseNotExpression() (IEvaluator, error) {
+	// Prefix form: "defined expr". "defined" is only treated as an operator
+	// when it is immediately followed by another token (the tested
+	// expression); a standalone "{{ defined }}" therefore keeps resolving as
+	// a normal variable for backwards compatibility.
+	if p.matchNameFollowedBy("defined") != nil {
+		innerExpr, err := p.parseNotExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &notExpression{expr: innerExpr, defined: true}, nil
+	}
+
 	if p.Match(TokenSymbol, "!") == nil && p.Match(TokenKeyword, "not") == nil {
-		return p.parseRelationalExpression()
+		expr, err := p.parseRelationalExpression()
+		if err != nil {
+			return nil, err
+		}
+		// Suffix form: "expr is defined" / "expr is not defined".
+		if p.matchName("is") != nil {
+			negated := p.Match(TokenKeyword, "not") != nil
+			if !negated {
+				if p.Match(TokenSymbol, "!") != nil {
+					negated = true
+				}
+			}
+			if p.matchName("defined") == nil {
+				return nil, p.Error("Expected 'defined' after 'is'.", p.Current())
+			}
+			test := &notExpression{expr: expr, defined: true}
+			if negated {
+				return &notExpression{expr: test}, nil
+			}
+			return test, nil
+		}
+		return expr, nil
 	}
 
 	var expr notExpression

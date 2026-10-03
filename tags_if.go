@@ -62,6 +62,9 @@ func (node *tagIfNode) Execute(ctx *ExecutionContext, writer TemplateWriter) err
 		if err != nil {
 			return err
 		}
+		if result.IsUndefined() {
+			return ctx.OrigError(errUndefinedConsumed(result, "if-condition"), condition.GetPositionToken())
+		}
 
 		if result.IsTrue() {
 			return node.wrappers[i].Execute(ctx, writer)

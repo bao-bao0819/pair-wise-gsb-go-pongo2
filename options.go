@@ -10,6 +10,21 @@ type Options struct {
 	// If this is set to true leading spaces and tabs are stripped from the
 	// start of a line to a block. Defaults to false
 	LStripBlocks bool
+
+	// StrictUndefined makes missing root variables, map keys and struct fields
+	// resolve to a special undefined value carrying the full access path
+	// (e.g. "user.profile.name") instead of being silently treated as nil.
+	//
+	// Merely accessing attributes of an undefined value keeps extending the
+	// path and never errors. An error is only raised when the undefined value
+	// is consumed by output, arithmetic, comparison, iteration, a boolean test
+	// or passed as a concrete function/macro argument. The "default"/
+	// "default_if_none" filters and the "defined" operator handle it on
+	// purpose.
+	//
+	// Explicit nil, false, 0 and empty strings remain defined values.
+	// Defaults to false (the historical lenient behavior).
+	StrictUndefined bool
 }
 
 func newOptions() *Options {
@@ -23,6 +38,7 @@ func newOptions() *Options {
 func (opt *Options) Update(other *Options) *Options {
 	opt.TrimBlocks = other.TrimBlocks
 	opt.LStripBlocks = other.LStripBlocks
+	opt.StrictUndefined = other.StrictUndefined
 
 	return opt
 }

@@ -98,6 +98,9 @@ func executeEvaluator(e IEvaluator, ctx *ExecutionContext, writer TemplateWriter
 	if err != nil {
 		return err
 	}
+	if err := checkUndefined(ctx, value, "template output", e.GetPositionToken()); err != nil {
+		return err
+	}
 	_, err = writer.WriteString(value.String())
 	return err
 }
@@ -191,6 +194,9 @@ func (nv *nodeVariable) Execute(ctx *ExecutionContext, writer TemplateWriter) er
 	if err != nil {
 		return err
 	}
+	if err := checkUndefined(ctx, value, "template output", nv.locationToken); err != nil {
+		return err
+	}
 
 	if !nv.expr.FilterApplied("safe") && !value.safe && value.IsString() && ctx.Autoescape {
 		// apply escape filter
@@ -229,34 +235,140 @@ func (vr *variableResolver) resolve(ctx *ExecutionContext) (*Value, error) {
 	if len(vr.parts) > 0 && vr.parts[0].typ == varTypeArray {
 		return vr.resolveArrayDefinition(ctx)
 	}
+	// Empty array literal "[]" has no parts at all.
+	if len(vr.parts) == 0 {
+		return &Value{val: reflect.ValueOf([]*Value{}), safe: true}, nil
+	}
+
+	strict := ctx.template.Options.StrictUndefined
 
 	var current reflect.Value
 	var isSafe bool
+	var undef *Value
+	path := vr.parts[0].s
 
 	for idx, part := range vr.parts {
+		parentPath := path
+
 		if idx == 0 {
-			current = vr.lookupInitialValue(ctx)
-		} else {
-			resolved, isNil, err := vr.resolveNextPart(ctx, current, part)
-			if err != nil {
-				return nil, err
+			var present bool
+			current, present = vr.lookupInitialValue(ctx)
+			if !present {
+				if strict {
+					undef = newUndefinedValue(path, path, undefinedRoot)
+				} else {
+					return AsValue(nil), nil
+				}
+			} else if !current.IsValid() {
+				// Explicitly nil root variable: a defined nil. Further access
+				// on it follows the historical nil semantics (nil result),
+				// never an undefined sentinel.
+				return AsValue(nil), nil
+			} else if current.Type() == typeOfValuePtr {
+				if root := current.Interface().(*Value); root.undefined {
+					if strict {
+						// Preserve the original access path when an undefined
+						// value was bound to a new name (set/with/macro arg).
+						undef = newUndefinedValue(root.path, root.origin, root.originKind)
+						path = root.path
+					} else {
+						return AsValue(nil), nil
+					}
+				} else {
+					// Unwrap a defined *Value root (e.g. explicit nil/false).
+					current = root.val
+					isSafe = root.safe
+				}
 			}
-			if isNil {
+			// An explicitly nil root (e.g. a macro argument defaulting to
+			// nil) is a defined value, even in strict mode.
+			if undef == nil && !current.IsValid() {
 				return AsValue(nil), nil
 			}
-			current = resolved
+		} else {
+			if undef == nil {
+				resolved, partText, miss, hasMiss, err := vr.resolveNextPart(ctx, current, part, parentPath)
+				if err != nil {
+					return nil, err
+				}
+				path += partText
+				if hasMiss {
+					if strict {
+						origin := path
+						if miss == undefinedNilContainer {
+							// The container itself (everything before this
+							// segment) was nil; the segment only extends path.
+							origin = parentPath
+						}
+						undef = newUndefinedValue(path, origin, miss)
+					} else {
+						return AsValue(nil), nil
+					}
+				} else {
+					current = resolved
+				}
+			} else {
+				// Strict mode: continue extending the access path without
+				// touching the underlying (missing) value.
+				partText, err := vr.renderPart(ctx, part)
+				if err != nil {
+					return nil, err
+				}
+				path += partText
+			}
+		}
+
+		if undef != nil {
+			// Calling something undefined is a consumer error; plain
+			// attribute/key access only extends the path.
+			if part.isFunctionCall {
+				return nil, ctx.OrigError(errUndefinedConsumed(undef, "function call"), vr.locationToken)
+			}
+			undef = newUndefinedValue(path, undef.origin, undef.originKind)
+			continue
 		}
 
 		if !current.IsValid() {
+			if strict {
+				undef = newUndefinedValue(path, parentPath, undefinedNilContainer)
+				if part.isFunctionCall {
+					return nil, ctx.OrigError(errUndefinedConsumed(undef, "function call"), vr.locationToken)
+				}
+				continue
+			}
 			return AsValue(nil), nil
 		}
 
-		// Unpack *Value if needed
-		current, isSafe = vr.unpackValue(current, isSafe)
+		// Unpack *Value if needed (propagating undefinedness)
+		if current.Type() == typeOfValuePtr {
+			nested := current.Interface().(*Value)
+			if nested.undefined {
+				if strict {
+					undef = newUndefinedValue(path, nested.origin, nested.originKind)
+					if part.isFunctionCall {
+						return nil, ctx.OrigError(errUndefinedConsumed(undef, "function call"), vr.locationToken)
+					}
+					continue
+				}
+				return AsValue(nil), nil
+			}
+			current = nested.val
+			isSafe = nested.safe
+		}
 
 		// Resolve interface to concrete value
-		if current.Kind() == reflect.Interface {
+		if current.IsValid() && current.Kind() == reflect.Interface {
 			current = reflect.ValueOf(current.Interface())
+			if !current.IsValid() {
+				if strict {
+					undef = newUndefinedValue(path, parentPath, undefinedNilContainer)
+					if part.isFunctionCall {
+						return nil, ctx.OrigError(errUndefinedConsumed(undef, "function call"), vr.locationToken)
+					}
+					continue
+				}
+				return AsValue(nil), nil
+			}
 		}
 
 		// Handle function call
@@ -267,14 +379,55 @@ func (vr *variableResolver) resolve(ctx *ExecutionContext) (*Value, error) {
 			}
 			current = result.value
 			isSafe = result.isSafe
+			if result.undefined {
+				// A host/macro function intentionally returned an undefined
+				// value; propagate it with the current access path.
+				if strict {
+					return newUndefinedValue(path, result.undefinedOrigin, result.undefinedKind), nil
+				}
+				return AsValue(nil), nil
+			}
 		}
 
 		if !current.IsValid() {
+			// An explicitly nil return value is a defined nil, not undefined.
+			if part.isFunctionCall {
+				return &Value{val: current, safe: isSafe}, nil
+			}
+			if strict {
+				undef = newUndefinedValue(path, parentPath, undefinedNilContainer)
+				continue
+			}
 			return AsValue(nil), nil
 		}
 	}
 
+	if undef != nil {
+		return undef, nil
+	}
 	return &Value{val: current, safe: isSafe}, nil
+}
+
+// renderPart renders the textual access segment of a part (".name",
+// ".0" or "[expr]") used to build the full access path.
+func (vr *variableResolver) renderPart(ctx *ExecutionContext, part *variablePart) (string, error) {
+	switch part.typ {
+	case varTypeIdent:
+		return "." + part.s, nil
+	case varTypeInt:
+		return "." + strconv.Itoa(part.i), nil
+	case varTypeSubscript:
+		sv, err := part.subscript.Evaluate(ctx)
+		if err != nil {
+			return "", err
+		}
+		if sv.undefined {
+			return "[<undefined>]", nil
+		}
+		return "[" + sv.String() + "]", nil
+	default:
+		return "", nil
+	}
 }
 
 // resolveArrayDefinition handles in-template array definitions like [a, b, c].
@@ -295,12 +448,14 @@ func (vr *variableResolver) resolveArrayDefinition(ctx *ExecutionContext) (*Valu
 }
 
 // lookupInitialValue looks up the first part of the variable in the context.
-func (vr *variableResolver) lookupInitialValue(ctx *ExecutionContext) reflect.Value {
-	val, inPrivate := ctx.Private[vr.parts[0].s]
-	if !inPrivate {
-		val = ctx.Public[vr.parts[0].s]
+// The second return value reports whether the name exists at all: an explicit
+// nil is present (and therefore defined), while a missing name is not.
+func (vr *variableResolver) lookupInitialValue(ctx *ExecutionContext) (reflect.Value, bool) {
+	val, present := ctx.Private[vr.parts[0].s]
+	if !present {
+		val, present = ctx.Public[vr.parts[0].s]
 	}
-	return reflect.ValueOf(val)
+	return reflect.ValueOf(val), present
 }
 
 // unpackValue unpacks a *Value if the current value is of that type.
@@ -312,18 +467,30 @@ func (vr *variableResolver) unpackValue(current reflect.Value, isSafe bool) (ref
 	return current, isSafe
 }
 
-// resolveNextPart resolves the next part of a variable path from the current value.
-// Returns (resolved value, isNil, error).
+// resolveNextPart resolves the next part of a variable path from the current
+// value. It returns the resolved reflect value, the textual path segment that
+// was accessed, and (on a soft "missing" result) the kind of miss. A miss
+// becomes a nil value in lenient mode and an undefined value (with full path)
+// in strict-undefined mode. Hard type errors are returned as errors.
 func (vr *variableResolver) resolveNextPart(
 	ctx *ExecutionContext,
 	current reflect.Value,
 	part *variablePart,
-) (reflect.Value, bool, error) {
+	parentPath string,
+) (resolved reflect.Value, partText string, miss undefinedOriginKind, missed bool, err error) {
+	// Compute the textual segment up front so that the path stays complete
+	// even when the access fails (e.g. dereferencing a nil pointer).
+	if part.typ == varTypeIdent {
+		partText = "." + part.s
+	} else if part.typ == varTypeInt {
+		partText = "." + strconv.Itoa(part.i)
+	}
+
 	// Check for method call first
 	if part.typ == varTypeIdent {
 		funcValue := current.MethodByName(part.s)
 		if funcValue.IsValid() {
-			return funcValue, false, nil
+			return funcValue, partText, 0, false, nil
 		}
 	}
 
@@ -331,19 +498,10 @@ func (vr *variableResolver) resolveNextPart(
 	if current.Kind() == reflect.Ptr {
 		current = current.Elem()
 		if !current.IsValid() {
-			return reflect.Value{}, true, nil
+			return reflect.Value{}, partText, undefinedNilContainer, true, nil
 		}
 	}
 
-	return vr.resolvePartByType(ctx, current, part)
-}
-
-// resolvePartByType resolves a variable part based on its type.
-func (vr *variableResolver) resolvePartByType(
-	ctx *ExecutionContext,
-	current reflect.Value,
-	part *variablePart,
-) (reflect.Value, bool, error) {
 	switch part.typ {
 	case varTypeInt:
 		return vr.resolveIntIndex(current, part)
@@ -357,36 +515,54 @@ func (vr *variableResolver) resolvePartByType(
 }
 
 // resolveIntIndex resolves an integer index access on a slice/array/string.
-func (vr *variableResolver) resolveIntIndex(current reflect.Value, part *variablePart) (reflect.Value, bool, error) {
+func (vr *variableResolver) resolveIntIndex(
+	current reflect.Value,
+	part *variablePart,
+) (reflect.Value, string, undefinedOriginKind, bool, error) {
+	segment := "." + strconv.Itoa(part.i)
 	switch current.Kind() {
 	case reflect.String:
 		// For strings, return the character (rune) at the index (Django-compatible behavior)
 		runes := []rune(current.String())
 		if part.i >= 0 && len(runes) > part.i {
-			return reflect.ValueOf(string(runes[part.i])), false, nil
+			return reflect.ValueOf(string(runes[part.i])), segment, 0, false, nil
 		}
-		return reflect.Value{}, true, nil
+		return reflect.Value{}, segment, undefinedIndex, true, nil
 	case reflect.Array, reflect.Slice:
 		if part.i >= 0 && current.Len() > part.i {
-			return current.Index(part.i), false, nil
+			return current.Index(part.i), segment, 0, false, nil
 		}
-		return reflect.Value{}, true, nil
+		return reflect.Value{}, segment, undefinedIndex, true, nil
 	default:
-		return reflect.Value{}, false, fmt.Errorf("can't access an index on type %s (variable %s)",
-			current.Kind().String(), vr.String())
+		return reflect.Value{}, segment, 0, false,
+			fmt.Errorf("can't access an index on type %s (variable %s)",
+				current.Kind().String(), vr.String())
 	}
 }
 
 // resolveIdentifier resolves a field or map key access by name.
-func (vr *variableResolver) resolveIdentifier(current reflect.Value, part *variablePart) (reflect.Value, bool, error) {
+func (vr *variableResolver) resolveIdentifier(
+	current reflect.Value,
+	part *variablePart,
+) (reflect.Value, string, undefinedOriginKind, bool, error) {
+	segment := "." + part.s
 	switch current.Kind() {
 	case reflect.Struct:
-		return current.FieldByName(part.s), false, nil
+		field := current.FieldByName(part.s)
+		if field.IsValid() {
+			return field, segment, 0, false, nil
+		}
+		return reflect.Value{}, segment, undefinedField, true, nil
 	case reflect.Map:
-		return current.MapIndex(reflect.ValueOf(part.s)), false, nil
+		mapValue := current.MapIndex(reflect.ValueOf(part.s))
+		if mapValue.IsValid() {
+			return mapValue, segment, 0, false, nil
+		}
+		return reflect.Value{}, segment, undefinedKey, true, nil
 	default:
-		return reflect.Value{}, false, fmt.Errorf("can't access a field by name on type %s (variable %s)",
-			current.Kind().String(), vr.String())
+		return reflect.Value{}, segment, 0, false,
+			fmt.Errorf("can't access a field by name on type %s (variable %s)",
+				current.Kind().String(), vr.String())
 	}
 }
 
@@ -395,10 +571,17 @@ func (vr *variableResolver) resolveSubscript(
 	ctx *ExecutionContext,
 	current reflect.Value,
 	part *variablePart,
-) (reflect.Value, bool, error) {
+) (reflect.Value, string, undefinedOriginKind, bool, error) {
 	sv, err := part.subscript.Evaluate(ctx)
 	if err != nil {
-		return reflect.Value{}, false, err
+		return reflect.Value{}, "", 0, false, err
+	}
+
+	if sv.undefined {
+		// A missing map key/slice index selector is itself an error, not an
+		// undefined chain.
+		return reflect.Value{}, "", 0, false,
+			ctx.OrigError(errUndefinedConsumed(sv, "subscript index"), part.subscript.GetPositionToken())
 	}
 
 	switch current.Kind() {
@@ -407,36 +590,48 @@ func (vr *variableResolver) resolveSubscript(
 		runes := []rune(current.String())
 		si := sv.Integer()
 		if si >= 0 && len(runes) > si {
-			return reflect.ValueOf(string(runes[si])), false, nil
+			return reflect.ValueOf(string(runes[si])), "[" + sv.String() + "]", 0, false, nil
 		}
-		return reflect.Value{}, true, nil
+		return reflect.Value{}, "[" + sv.String() + "]", undefinedIndex, true, nil
 	case reflect.Array, reflect.Slice:
 		si := sv.Integer()
 		if si >= 0 && current.Len() > si {
-			return current.Index(si), false, nil
+			return current.Index(si), "[" + sv.String() + "]", 0, false, nil
 		}
-		return reflect.Value{}, true, nil
+		return reflect.Value{}, "[" + sv.String() + "]", undefinedIndex, true, nil
 	case reflect.Struct:
-		return current.FieldByName(sv.String()), false, nil
+		field := current.FieldByName(sv.String())
+		if field.IsValid() {
+			return field, "[" + sv.String() + "]", 0, false, nil
+		}
+		return reflect.Value{}, "[" + sv.String() + "]", undefinedField, true, nil
 	case reflect.Map:
 		if sv.IsNil() {
-			return reflect.Value{}, true, nil
+			return reflect.Value{}, "[" + sv.String() + "]", undefinedKey, true, nil
 		}
 		svResolved := sv.getResolvedValue()
 		if svResolved.IsValid() && svResolved.Type().AssignableTo(current.Type().Key()) {
-			return current.MapIndex(svResolved), false, nil
+			mapValue := current.MapIndex(svResolved)
+			if mapValue.IsValid() {
+				return mapValue, "[" + sv.String() + "]", 0, false, nil
+			}
+			return reflect.Value{}, "[" + sv.String() + "]", undefinedKey, true, nil
 		}
-		return reflect.Value{}, true, nil
+		return reflect.Value{}, "[" + sv.String() + "]", undefinedKey, true, nil
 	default:
-		return reflect.Value{}, false, fmt.Errorf("can't access an index on type %s (variable %s)",
-			current.Kind().String(), vr.String())
+		return reflect.Value{}, "[" + sv.String() + "]", 0, false,
+			fmt.Errorf("can't access an index on type %s (variable %s)",
+				current.Kind().String(), vr.String())
 	}
 }
 
 // callResult holds the result of a function call resolution.
 type callResult struct {
-	value  reflect.Value
-	isSafe bool
+	value           reflect.Value
+	isSafe          bool
+	undefined       bool
+	undefinedOrigin string
+	undefinedKind   undefinedOriginKind
 }
 
 // handleFunctionCall processes a function call on the current value and returns the result.
@@ -495,6 +690,15 @@ func (vr *variableResolver) prepareCallParameters(
 		}
 
 		fnArg := vr.getFnArgType(t, idx, numArgs, isVariadic)
+
+		// An undefined value can only be handed to a function that explicitly
+		// accepts *pongo2.Value (it can then test IsUndefined itself). It must
+		// never be silently converted to a nil/zero concrete argument.
+		if pv.IsUndefined() && fnArg != typeOfValuePtr {
+			return nil, ctx.OrigError(
+				errUndefinedConsumed(pv, fmt.Sprintf("function argument %d of '%s'", idx+1, vr.String())),
+				vr.locationToken)
+		}
 
 		param, err := vr.convertArgToParam(pv, fnArg, idx, isVariadic)
 		if err != nil {
@@ -571,6 +775,11 @@ func (vr *variableResolver) executeCall(
 		result.value = reflect.ValueOf(rv.Interface())
 	} else {
 		val := rv.Interface().(*Value)
+		if val.undefined {
+			result.undefined = true
+			result.undefinedOrigin = val.origin
+			result.undefinedKind = val.originKind
+		}
 		result.value = val.val
 		result.isSafe = val.safe
 	}

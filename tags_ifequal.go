@@ -37,6 +37,12 @@ func (node *tagIfEqualNode) Execute(ctx *ExecutionContext, writer TemplateWriter
 	if err != nil {
 		return err
 	}
+	if err := checkUndefined(ctx, r1, "comparison", node.var1.GetPositionToken()); err != nil {
+		return err
+	}
+	if err := checkUndefined(ctx, r2, "comparison", node.var2.GetPositionToken()); err != nil {
+		return err
+	}
 
 	result := r1.EqualValueTo(r2)
 

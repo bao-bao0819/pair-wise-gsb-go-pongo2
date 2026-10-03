@@ -23,6 +23,44 @@ Access struct fields, map keys, and slice/array indices:
 {{ items[index] }}       {# Dynamic index #}
 ```
 
+### Strict Undefined Mode
+
+By default a missing variable, map key or struct field renders as an empty
+string (Django/lenient behavior). Enabling strict undefined mode makes such
+accesses produce a special *undefined* value instead:
+
+```go
+set := pongo2.NewSet("strict", loader)
+set.SetStrictUndefined(true)
+// or per template: tpl.Options.StrictUndefined = true
+```
+
+The undefined value records the full access path. Simply chaining more
+attribute/key accesses only extends the path and never fails; an error is
+raised only when the value is actually *consumed*:
+
+- template output (`{{ ... }}`)
+- arithmetic (`+`, `-`, `*`, `/`, `%`, `^`, unary `-`)
+- comparisons (`==`, `!=`, `<`, etc.) and boolean tests (`if`, `not`)
+- iteration (`{% for %}`)
+- concrete function/macro/filter arguments
+
+Error messages pinpoint where the chain broke and the path used, so a missing
+intermediate value is distinguishable from a missing leaf:
+
+```text
+map key 'user.profile' does not exist (accessed as user.profile.name)
+map key 'user.profile.name' does not exist
+```
+
+Explicit `nil`, `false`, `0` and empty strings remain defined values. Handle
+an undefined value intentionally with the [`default` filter](filters.md), the
+[`defined` operator](#testing-for-definition-the-defined-operator), or by
+accepting a `*pongo2.Value` in a host function and testing `v.IsUndefined()` /
+`v.UndefinedPath()`. Short-circuiting `and`/`or` never evaluates the skipped
+branch, and a genuine error returned by a host function is never turned into
+an undefined value.
+
 ### Calling Methods
 
 Call methods on objects:
@@ -115,6 +153,26 @@ Check if a value is contained in another:
 {% if item in list %}yes{% endif %}             {# Slice contains #}
 {% if !(key in dict) %}not found{% endif %}     {# Negation #}
 ```
+
+### Testing for Definition: the `defined` Operator
+
+Use `defined` to check whether a value exists without consuming it. This is
+mainly useful together with [strict undefined mode](#strict-undefined-mode),
+but works in normal mode too. Every value that is actually present — including
+explicit `nil`, `false`, `0` and `""` — counts as defined; only a missing root
+variable, map key or struct field is undefined.
+
+```django
+{% if defined user.profile.name %}{{ user.profile.name }}{% endif %}
+{% if user.profile.name is defined %}...{% endif %}
+{% if user.profile.name is not defined %}...{% endif %}
+{% if not defined user.profile.name %}...{% endif %}
+```
+
+`defined` is evaluated without descending into the access chain, so a missing
+intermediate value is reported as "not defined" instead of raising an error.
+A bare `{{ defined }}` still resolves as an ordinary variable named `defined`
+for backwards compatibility; the operator form always has an operand.
 
 ### Grouping with Parentheses
 

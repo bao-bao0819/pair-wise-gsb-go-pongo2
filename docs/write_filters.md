@@ -52,6 +52,8 @@ func (v *Value) IsFloat() bool     // Is the value a float (float32, float64)?
 func (v *Value) IsNumber() bool    // Is the value a number (integer or float)?
 func (v *Value) IsBool() bool      // Is the value a boolean?
 func (v *Value) IsNil() bool       // Is the value nil?
+func (v *Value) IsUndefined() bool  // Is the value an undefined (missing) value?
+func (v *Value) UndefinedPath() string // Full access path when IsUndefined()
 func (v *Value) IsTime() bool      // Is the value a time.Time?
 func (v *Value) IsTrue() bool      // Is the value "truthy" (Pythonic evaluation)?
 func (v *Value) CanSlice() bool    // Can the value be sliced (array, slice, string)?
@@ -67,6 +69,19 @@ func (v *Value) Bool() bool        // Get bool value (returns false if not bool)
 func (v *Value) Time() time.Time   // Get time.Time value (returns zero time if not time)
 func (v *Value) Interface() any    // Get the underlying Go value
 ```
+
+### Undefined Inputs (Strict Undefined Mode)
+
+When a [template set uses strict undefined mode](template-syntax.md#strict-undefined-mode),
+an input that refers to a missing variable/key/field is an undefined value
+(`IsUndefined()` returns true). pongo2 refuses to run an ordinary filter on
+such an input before your function is called, so a filter cannot accidentally
+convert the undefined sentinel into a zero value. Fallback filters (currently
+`default`) are deliberately allowed to receive it. If you write a filter that
+should also handle undefined input on purpose, register it and inspect
+`in.IsUndefined()` / `in.UndefinedPath()` instead of calling `in.String()`.
+Note that `IsNil()` is false for an undefined value; an explicit `nil` and a
+missing value are distinct.
 
 ### Collection Methods
 

@@ -439,22 +439,29 @@ Alias for `date`. Formats time values.
 
 ### default
 
-Returns the argument if value is empty/false.
+Returns the argument if value is empty/false. In strict undefined mode
+`default` is also the intended way to fall back for a missing value: an
+undefined input is treated like a falsy value, while its access path is kept
+available if you do not handle it.
 
 ```django
 {{ value|default:"nothing" }}
 {{ ""|default:"empty" }}     {# empty #}
 {{ 0|default:"zero" }}       {# zero #}
 {{ false|default:"nope" }}   {# nope #}
+{{ user.missing|default:"guest" }}  {# guest (strict undefined mode) #}
 ```
 
 ### default_if_none
 
-Returns the argument only if value is nil.
+Returns the argument only if value is an explicit nil. An undefined (missing)
+value is *not* nil, so `default_if_none` leaves it untouched; use `default` or
+the `defined` operator for missing values.
 
 ```django
 {{ value|default_if_none:"nothing" }}
 {{ 0|default_if_none:"zero" }}  {# 0 (not replaced) #}
+{{ nil|default_if_none:"na" }}  {# na #}
 ```
 
 ## Boolean Filters

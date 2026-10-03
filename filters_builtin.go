@@ -795,7 +795,10 @@ func filterDefault(in *Value, param *Value) (*Value, error) {
 // If value is 0, output: 0 (unlike default filter)
 // If value is "", output: "" (unlike default filter)
 func filterDefaultIfNone(in *Value, param *Value) (*Value, error) {
-	if in.IsNil() {
+	// Undefined is distinct from an explicit nil: default_if_none must only
+	// react to an actual nil and leave undefined values to surface (or to be
+	// handled via "default" / the "defined" operator).
+	if in.IsNil() && !in.IsUndefined() {
 		return param, nil
 	}
 	return in, nil
@@ -1017,7 +1020,11 @@ func filterJoin(in *Value, param *Value) (*Value, error) {
 		}
 	} else {
 		for i := 0; i < in.Len(); i++ {
-			sl = append(sl, in.Index(i).String())
+			elem := in.Index(i)
+			if elem.IsUndefined() {
+				return nil, errUndefinedConsumed(elem, "join element")
+			}
+			sl = append(sl, elem.String())
 		}
 	}
 

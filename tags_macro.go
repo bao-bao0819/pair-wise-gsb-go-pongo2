@@ -90,22 +90,6 @@ func (node *tagMacroNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, error) {
 	argsCtx := make(Context)
 
-	for k, v := range node.args {
-		if v == nil {
-			// User did not provided a default value
-			argsCtx[k] = nil
-		} else {
-			// Evaluate the default value
-			valueExpr, err := v.Evaluate(ctx)
-			if err != nil {
-				ctx.Logf(err.Error())
-				return AsSafeValue(""), err
-			}
-
-			argsCtx[k] = valueExpr.Interface()
-		}
-	}
-
 	if len(args) > len(node.argsOrder) {
 		// Too many arguments, we're ignoring them and just logging into debug mode.
 		err := ctx.Error(fmt.Sprintf("Macro '%s' called with too many arguments (%d instead of %d).",
@@ -114,15 +98,35 @@ func (node *tagMacroNode) call(ctx *ExecutionContext, args ...*Value) (*Value, e
 		return AsSafeValue(""), err
 	}
 
+	for idx, argValue := range args {
+		// Keep the *Value (undefinedness included): converting via Interface()
+		// would silently turn an undefined argument into a plain nil.
+		argsCtx[node.argsOrder[idx]] = argValue
+	}
+
+	// Fill remaining parameters with their (lazily evaluated) defaults. Only
+	// parameters that were not supplied are evaluated, so a missing argument
+	// cannot force evaluation of an unrelated/skipped default expression.
+	for idx := len(args); idx < len(node.argsOrder); idx++ {
+		name := node.argsOrder[idx]
+		defaultExpr, hasDefault := node.args[name]
+		if !hasDefault || defaultExpr == nil {
+			// No default value provided: an explicit (defined) nil.
+			argsCtx[name] = AsValue(nil)
+			continue
+		}
+		valueExpr, err := defaultExpr.Evaluate(ctx)
+		if err != nil {
+			return AsSafeValue(""), err
+		}
+		argsCtx[name] = valueExpr
+	}
+
 	// Make a context for the macro execution
 	macroCtx := NewChildExecutionContext(ctx)
 
 	// Register all arguments in the private context
 	macroCtx.Private.Update(argsCtx)
-
-	for idx, argValue := range args {
-		macroCtx.Private[node.argsOrder[idx]] = argValue.Interface()
-	}
 
 	var b bytes.Buffer
 	err := node.wrapper.Execute(macroCtx, &b)
