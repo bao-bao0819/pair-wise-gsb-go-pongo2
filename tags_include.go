@@ -89,18 +89,28 @@ func (node *tagIncludeNode) Execute(ctx *ExecutionContext, writer TemplateWriter
 			}
 			return err2
 		}
-		err2 = includedTpl.ExecuteWriter(includeCtx, writer)
+		err2 = includedTpl.executeIncluded(includeCtx, ctx, writer)
 		if err2 != nil {
 			return err2
 		}
 		return nil
 	}
 	// Template is already parsed with static filename
-	err := node.tpl.ExecuteWriter(includeCtx, writer)
+	err := node.tpl.executeIncluded(includeCtx, ctx, writer)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+// executeIncluded renders an included template while propagating the active
+// per-request TranslateOptions (language/translator isolation is preserved).
+func (tpl *Template) executeIncluded(includeCtx Context, parent *ExecutionContext,
+	writer TemplateWriter) error {
+	if _, ok := parent.Private[transContextKey]; !ok {
+		return tpl.ExecuteWriter(includeCtx, writer)
+	}
+	return tpl.executeTranslated(includeCtx, transOptionsFromContext(parent), writer)
 }
 
 // tagIncludeEmptyNode is a placeholder node returned when a static include

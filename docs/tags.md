@@ -374,6 +374,60 @@ Outputs content without processing template syntax.
 
 Useful for client-side templates (Vue.js, Angular, etc.).
 
+## Internationalization Tags
+
+### trans / plural / endtrans
+
+Marks a block for translation. Inside the block only plain text and simple
+named placeholders (`{{ name }}`) are allowed; filters, function calls,
+attribute access and nested tags are rejected at compile time. This keeps
+translation files free of executable template expressions.
+
+Placeholders use the gettext-style `%(name)s` syntax in the extracted
+messages and in translations. A translation may reorder or repeat declared
+placeholders, but unknown placeholders and missing required placeholders are
+rejected.
+
+An optional `count EXPR [as NAME]` clause enables a plural section. The
+count expression is evaluated exactly once per render; `NAME` defaults to
+the expression identifier (or `count`) and becomes the `%(NAME)s`
+placeholder.
+
+```django
+{% trans %}
+  Hello, {{ name }}!
+{% endtrans %}
+
+{% trans count items %}
+  You have {{ items }} new message
+{% plural %}
+  You have {{ items }} new messages
+{% endtrans %}
+```
+
+Compile a template as usual and extract stable messages without executing
+anything:
+
+```go
+tpl, _ := pongo2.FromString(source)
+for _, msg := range tpl.TranslationMessages() {
+	// msg.Singular, msg.Plural, msg.HasPlural, msg.Placeholders
+}
+```
+
+Render with a request-scoped `Translator` and language. Translation text is
+treated as plain text and is never re-parsed as a template; placeholder
+values follow the surrounding autoescape rules.
+
+```go
+out, err := tpl.ExecuteTranslated(ctx, pongo2.TranslateOptions{
+	Translator: myTranslator,
+	Language:   lang,
+	// MissingPolicy and ErrorPolicy select source fallback, empty output
+	// or a hard error for missing/invalid translations.
+})
+```
+
 ## Utility Tags
 
 ### comment / endcomment

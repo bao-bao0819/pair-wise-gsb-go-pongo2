@@ -110,6 +110,11 @@ type Template struct {
 	// point for template execution. Execute() calls root.Execute() to render.
 	root *nodeDocument
 
+	// transNodes holds every {% trans %} block parsed in this template, in
+	// source order. It backs Template.TranslationMessages(); extraction is a
+	// pure compile-time operation and never evaluates expressions.
+	transNodes []*tagTransNode
+
 	// Options allow you to change the behavior of template-engine.
 	// You can change the options before calling the Execute method.
 	// Includes settings like TrimBlocks and LStripBlocks for whitespace control.
@@ -279,6 +284,53 @@ func (tpl *Template) execute(context Context, writer TemplateWriter) error {
 	}
 
 	return nil
+}
+
+// executeTranslated renders the template with per-execution translation
+// options stored in the private context. The options are scoped to this
+// render only, so nested blocks inherit them while concurrent requests stay
+// isolated.
+func (tpl *Template) executeTranslated(context Context, transOpts TranslateOptions,
+	writer TemplateWriter) error {
+	parent, ctx, err := tpl.newContextForExecution(context)
+	if err != nil {
+		return err
+	}
+	ctx.Private[transContextKey] = transOpts
+	return parent.root.Execute(ctx, writer)
+}
+
+func (tpl *Template) newBufferForTranslation(context Context,
+	opts TranslateOptions) (*bytes.Buffer, error) {
+	buffer := bytes.NewBuffer(make([]byte, 0, int(float64(tpl.size)*1.3)))
+	if err := tpl.executeTranslated(context, opts, buffer); err != nil {
+		return nil, err
+	}
+	return buffer, nil
+}
+
+// ExecuteTranslated executes the template with the given translation options
+// and returns the rendered output as a string. Use it instead of Execute when
+// the template contains {% trans %} blocks resolved through a request-specific
+// translator and language.
+func (tpl *Template) ExecuteTranslated(context Context, opts TranslateOptions) (string, error) {
+	buffer, err := tpl.newBufferForTranslation(context, opts)
+	if err != nil {
+		return "", err
+	}
+	return buffer.String(), nil
+}
+
+// ExecuteTranslatedWriter executes the template with translation options and
+// writes the buffered result to writer. Nothing is written on error.
+func (tpl *Template) ExecuteTranslatedWriter(context Context, opts TranslateOptions,
+	writer io.Writer) error {
+	buffer, err := tpl.newBufferForTranslation(context, opts)
+	if err != nil {
+		return err
+	}
+	_, err = buffer.WriteTo(writer)
+	return err
 }
 
 // newTemplateWriterAndExecute wraps an io.Writer in a templateWriter and executes.
