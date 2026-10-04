@@ -192,6 +192,17 @@ func (nv *nodeVariable) Execute(ctx *ExecutionContext, writer TemplateWriter) er
 		return err
 	}
 
+	if kind, ok := contextualSlot(ctx.escapeFrames(), nv); ok {
+		// Contextual escaping is a strict mode: it ignores "safe" marks and
+		// always validates the value against the concrete output context.
+		out, err := contextualEscape(kind, value)
+		if err != nil {
+			return ctx.OrigError(err, nv.locationToken)
+		}
+		_, err = writer.WriteString(out)
+		return err
+	}
+
 	if !nv.expr.FilterApplied("safe") && !value.safe && value.IsString() && ctx.Autoescape {
 		// apply escape filter
 		escapeFn := ctx.template.set.filters["escape"]

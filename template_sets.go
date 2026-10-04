@@ -42,6 +42,17 @@ type TemplateSet struct {
 	// When true (default), string output will be escaped for safety.
 	autoescape bool
 
+	// contextualEscaping enables explicit context-aware escaping. When enabled,
+	// every variable output is escaped for the exact place it occurs in
+	// (HTML text, quoted attribute, URL attribute or quoted JavaScript
+	// string) instead of receiving uniform HTML escaping. The mode is
+	// opt-in: normal templates keep the existing HTML autoescape behavior.
+	//
+	// Only statically decidable contexts are supported; templates that use
+	// variables in contexts that cannot be determined are rejected at
+	// compile time. Enable it before compiling the first template.
+	contextualEscaping bool
+
 	// Options allow you to change the behavior of template-engine.
 	// You can change the options before calling the Execute method.
 	Options *Options
@@ -199,6 +210,34 @@ func (set *TemplateSet) RegisterFilter(name string, fn FilterFunction) error {
 // RegisterFilter registers a new filter for this template set.
 func (set *TemplateSet) SetAutoescape(v bool) {
 	set.autoescape = v
+}
+
+// SetContextualEscaping enables or disables the opt-in context-aware escaping
+// mode for this template set. It must be called before any template is
+// compiled (like BanTag/BanFilter) because the contextual analysis runs at
+// compile time.
+//
+// In contextual mode the engine tracks, at compile time, whether each
+// variable output lands in HTML text, a quoted (non-URL) attribute, a quoted
+// URL attribute (href/src/...) or a single/double quoted JavaScript string,
+// and applies the matching escape rules. Contexts that cannot be determined
+// statically (arbitrary script/CSS content, dynamic tag/attribute names,
+// event handler or style attributes, dynamic includes, ...) cause a compile
+// error pointing at the template position that makes the context ambiguous.
+// See docs/contextual-escaping.md for the complete supported range.
+func (set *TemplateSet) SetContextualEscaping(v bool) error {
+	if set.firstTemplateCreated.Load() {
+		return errors.New("you cannot change the contextual escaping mode after you've added your first template to your template set")
+	}
+	set.contextualEscaping = v
+	return nil
+}
+
+// MustSetContextualEscaping is like SetContextualEscaping but panics on error.
+func (set *TemplateSet) MustSetContextualEscaping(v bool) {
+	if err := set.SetContextualEscaping(v); err != nil {
+		panic(err)
+	}
 }
 
 // ReplaceFilter replaces an already registered filter in this template set.

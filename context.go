@@ -95,6 +95,12 @@ type ExecutionContext struct {
 	// shared across all child contexts within a single execution, so tags
 	// maintain consistent state regardless of nesting depth.
 	tagState map[any]any
+
+	// contextualFrames is the active contextual escaping frame stack (top
+	// frame last). It mirrors the static include nesting used to compile the
+	// output, so a variable node resolves to the escape kind of the include
+	// site it is rendered through. Nil when contextual mode is disabled.
+	contextualFrames []*contextualFrame
 }
 
 var pongo2MetaContext = Context{
@@ -127,10 +133,11 @@ func NewChildExecutionContext(parent *ExecutionContext) *ExecutionContext {
 	newctx := &ExecutionContext{
 		template: parent.template,
 
-		Public:     parent.Public,
-		Private:    make(Context),
-		Autoescape: parent.Autoescape,
-		tagState:   parent.tagState,
+		Public:           parent.Public,
+		Private:          make(Context),
+		Autoescape:       parent.Autoescape,
+		tagState:         parent.tagState,
+		contextualFrames: parent.contextualFrames,
 	}
 	newctx.Shared = parent.Shared
 
@@ -167,4 +174,18 @@ func (ctx *ExecutionContext) OrigError(err error, token *Token) error {
 
 func (ctx *ExecutionContext) Logf(format string, args ...any) {
 	ctx.template.set.logf(format, args...)
+}
+
+// escapeFrames returns the active contextual frame stack (nil when the
+// contextual escaping mode is disabled).
+func (ctx *ExecutionContext) escapeFrames() []*contextualFrame {
+	return ctx.contextualFrames
+}
+
+// escapeTop returns the topmost contextual frame, or nil when inactive.
+func (ctx *ExecutionContext) escapeTop() *contextualFrame {
+	if len(ctx.contextualFrames) == 0 {
+		return nil
+	}
+	return ctx.contextualFrames[len(ctx.contextualFrames)-1]
 }

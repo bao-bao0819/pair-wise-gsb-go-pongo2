@@ -86,14 +86,7 @@ func (node *tagCycleNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 		t.value = val
 
 		if !t.node.silent {
-			// Apply autoescape like Django's render_value_in_context
-			if ctx.Autoescape && !item.FilterApplied("safe") && val.IsString() {
-				val, err = ctx.template.set.ApplyFilter("escape", val, nil)
-				if err != nil {
-					return err
-				}
-			}
-			if _, err := writer.WriteString(val.String()); err != nil {
+			if err := writeCycleValue(ctx, writer, t.node, item, val); err != nil {
 				return err
 			}
 		}
@@ -109,14 +102,7 @@ func (node *tagCycleNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 			ctx.Private[node.asName] = cycleValue
 		}
 		if !node.silent {
-			// Apply autoescape like Django's render_value_in_context
-			if ctx.Autoescape && !item.FilterApplied("safe") && val.IsString() {
-				val, err = ctx.template.set.ApplyFilter("escape", val, nil)
-				if err != nil {
-					return err
-				}
-			}
-			if _, err := writer.WriteString(val.String()); err != nil {
+			if err := writeCycleValue(ctx, writer, node, item, val); err != nil {
 				return err
 			}
 		}
@@ -172,4 +158,22 @@ func tagCycleParser(doc *Parser, start *Token, arguments *Parser) (INodeTag, err
 
 func init() {
 	mustRegisterTag("cycle", tagCycleParser)
+}
+
+// writeCycleValue renders one resolved cycle value, applying contextual
+// escaping when the node has a contextual annotation and Django-style
+// autoescape otherwise.
+func writeCycleValue(ctx *ExecutionContext, writer TemplateWriter, node *tagCycleNode, item IEvaluator, val *Value) error {
+	if handled, err := writeContextual(ctx, writer, node, val, node.position); handled {
+		return err
+	}
+	if ctx.Autoescape && !item.FilterApplied("safe") && val.IsString() {
+		escaped, err := ctx.template.set.ApplyFilter("escape", val, nil)
+		if err != nil {
+			return err
+		}
+		val = escaped
+	}
+	_, err := writer.WriteString(val.String())
+	return err
 }

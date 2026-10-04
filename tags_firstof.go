@@ -42,6 +42,9 @@ func (node *tagFirstofNode) Execute(ctx *ExecutionContext, writer TemplateWriter
 		}
 
 		if val.IsTrue() {
+			if handled, cerr := writeContextual(ctx, writer, node, val, node.position); handled {
+				return cerr
+			}
 			if ctx.Autoescape && !arg.FilterApplied("safe") {
 				val, err = ctx.template.set.ApplyFilter("escape", val, nil)
 				if err != nil {

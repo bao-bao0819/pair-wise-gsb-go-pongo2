@@ -41,6 +41,12 @@ func (tpl *Template) parse() error {
 		return err
 	}
 	tpl.root = doc
+
+	if tpl.set.contextualEscaping {
+		if err := analyzeTemplateRoot(tpl); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

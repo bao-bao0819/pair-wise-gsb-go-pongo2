@@ -292,6 +292,28 @@ set.SetAutoescape(true)   // Enable HTML escaping (default)
 pongo2.SetAutoescape(false)
 ```
 
+## Contextual Escaping
+
+Uniform HTML escaping cannot distinguish element text from attribute, URL,
+and JavaScript string positions. For strict output (mail templates are a
+typical case) you can opt into compile-time context-aware escaping:
+
+```go
+set := pongo2.NewSet("mail", loader)
+if err := set.SetContextualEscaping(true); err != nil {
+    // Must be enabled before the first template is compiled.
+    log.Fatal(err)
+}
+```
+
+The engine then tracks HTML text, quoted attributes, URL attributes and
+single/double quoted JavaScript strings across nodes, `if` branches, `for`
+bodies, static `include` and `extends`/`block` composition. Places it cannot
+prove (arbitrary script/CSS, dynamic tag or attribute names, event handlers,
+dynamic includes, and more) produce a compile error at the responsible
+position. See [Contextual Escaping](contextual-escaping.md) for the complete
+supported range and the explicit refusals.
+
 ## Per-Set Tags and Filters
 
 Each template set has its own tag and filter registries. This allows different template sets to have different custom extensions.

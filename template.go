@@ -110,6 +110,11 @@ type Template struct {
 	// point for template execution. Execute() calls root.Execute() to render.
 	root *nodeDocument
 
+	// contextualFrame holds the compile-time contextual escaping analysis
+	// result for the executed (root) template. It is populated only when the
+	// owning TemplateSet runs with contextual escaping enabled.
+	contextualFrame *contextualFrame
+
 	// Options allow you to change the behavior of template-engine.
 	// You can change the options before calling the Execute method.
 	// Includes settings like TrimBlocks and LStripBlocks for whitespace control.
@@ -273,11 +278,40 @@ func (tpl *Template) execute(context Context, writer TemplateWriter) error {
 		return err
 	}
 
+	if parent.contextualFrame != nil {
+		ctx.contextualFrames = []*contextualFrame{parent.contextualFrame}
+	}
+
 	// Run the selected document
 	if err := parent.root.Execute(ctx, writer); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// executeWithContextFrames renders the template using an explicit contextual
+// frame stack. It is used by the static include tag: inherited is the stack of
+// the including render and child is the frame compiled for this include site
+// (nil for a missing include). The stack is not copied, so includes nested
+// inside the included template continue to resolve against the same chain.
+func (tpl *Template) executeWithContextFrames(
+	context Context,
+	writer TemplateWriter,
+	inherited []*contextualFrame,
+	child *contextualFrame,
+) error {
+	parent, ctx, err := tpl.newContextForExecution(context)
+	if err != nil {
+		return err
+	}
+	if child != nil || len(inherited) > 0 {
+		ctx.contextualFrames = append(append([]*contextualFrame{}, inherited...), child)
+	}
+
+	if err := parent.root.Execute(ctx, writer); err != nil {
+		return err
+	}
 	return nil
 }
 

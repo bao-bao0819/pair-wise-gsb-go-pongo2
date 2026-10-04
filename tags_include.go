@@ -42,6 +42,7 @@ type tagIncludeNode struct {
 	filename          string
 	withPairs         map[string]IEvaluator
 	ifExists          bool
+	position          *Token
 }
 
 // Execute renders the included template with the appropriate context.
@@ -96,7 +97,9 @@ func (node *tagIncludeNode) Execute(ctx *ExecutionContext, writer TemplateWriter
 		return nil
 	}
 	// Template is already parsed with static filename
-	err := node.tpl.ExecuteWriter(includeCtx, writer)
+	// The included template renders from its own root document with the frame
+	// analyzed for this include site; nested static includes chain from it.
+	err := node.tpl.executeWithContextFrames(includeCtx, writer, nil, node.tpl.contextualFrame)
 	if err != nil {
 		return err
 	}
@@ -117,6 +120,7 @@ func (node *tagIncludeEmptyNode) Execute(ctx *ExecutionContext, writer TemplateW
 func tagIncludeParser(doc *Parser, start *Token, arguments *Parser) (INodeTag, error) {
 	includeNode := &tagIncludeNode{
 		withPairs: make(map[string]IEvaluator),
+		position:  start,
 	}
 
 	if filenameToken := arguments.MatchType(TokenString); filenameToken != nil {

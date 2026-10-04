@@ -12,6 +12,7 @@ pongo2 is a Django-syntax compatible template engine for Go.
 - **Macros** - Reusable template fragments with arguments and default values
 - **Extensible** - Custom filters and tags
 - **Sandbox Mode** - Restrict available tags and filters
+- **Contextual Escaping** - Opt-in, compile-time context-aware escaping for text, attributes, URLs and JavaScript strings (see [Contextual Escaping](contextual-escaping.md))
 - **Multiple Loaders** - Load templates from filesystem, embedded files, HTTP, or custom sources
 
 ## Quick Start
