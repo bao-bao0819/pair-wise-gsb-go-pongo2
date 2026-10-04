@@ -1,8 +1,12 @@
 package pongo2
 
+import "errors"
+
 // tagForNode represents the {% for %} tag.
 //
-// The for tag loops over each item in a sequence (slice, array, map, or string).
+// The for tag loops over each item in a sequence (slice, array, map, or
+// string) or lazily consumes an Iterator (see iterator.go) without
+// materializing all items first.
 // It provides loop variables through the special "forloop" object.
 //
 // Basic usage:
@@ -40,11 +44,16 @@ package pongo2
 // Loop variables available via forloop:
 //   - forloop.Counter: Current iteration (1-indexed)
 //   - forloop.Counter0: Current iteration (0-indexed)
-//   - forloop.Revcounter: Iterations remaining (1-indexed)
-//   - forloop.Revcounter0: Iterations remaining (0-indexed)
+//   - forloop.Revcounter: Iterations remaining (1-indexed), nil if the
+//     total length is unknown (lazy iterators without SizedIterator)
+//   - forloop.Revcounter0: Iterations remaining (0-indexed), nil if unknown
 //   - forloop.First: True if this is the first iteration
 //   - forloop.Last: True if this is the last iteration
 //   - forloop.Parentloop: Access parent loop in nested loops
+//
+// Loop control:
+//   - {% break %} stops the innermost loop
+//   - {% continue %} skips to the next item of the innermost loop
 //
 // Example with loop variables:
 //
@@ -68,16 +77,25 @@ type tagForNode struct {
 type tagForLoopInformation struct {
 	Counter     int
 	Counter0    int
-	Revcounter  int
-	Revcounter0 int
+	Revcounter  *int // nil when the total length is unknown (lazy iterators)
+	Revcounter0 *int // nil when the total length is unknown (lazy iterators)
 	First       bool
 	Last        bool
 	Parentloop  *tagForLoopInformation
 }
 
-// Execute iterates over the object and renders the body for each item.
-// If the object is empty, it renders the empty wrapper (if present).
-func (node *tagForNode) Execute(ctx *ExecutionContext, writer TemplateWriter) (forError error) {
+// setRevcounter updates the length-dependent counters for a known length.
+func (li *tagForLoopInformation) setRevcounter(count, idx int) {
+	revcounter := count - idx
+	revcounter0 := count - (idx + 1)
+	li.Revcounter = &revcounter
+	li.Revcounter0 = &revcounter0
+}
+
+// Execute evaluates the loop object and dispatches to lazy iterator
+// consumption or classic sequence iteration. If the object is empty, it
+// renders the empty wrapper (if present).
+func (node *tagForNode) Execute(ctx *ExecutionContext, writer TemplateWriter) error {
 	// Backup forloop (as parentloop in public context), key-name and value-name
 	forCtx := NewChildExecutionContext(ctx)
 	parentloop := forCtx.Private["forloop"]
@@ -100,6 +118,21 @@ func (node *tagForNode) Execute(ctx *ExecutionContext, writer TemplateWriter) (f
 		return err
 	}
 
+	if it, ok := obj.Interface().(Iterator); ok {
+		return node.executeIterator(forCtx, writer, loopInfo, it)
+	}
+	return node.executeSequence(forCtx, writer, loopInfo, obj)
+}
+
+// executeSequence iterates over slices, arrays, maps and strings using
+// Value.IterateOrder, preserving the historic behavior (all counters,
+// including the length-dependent ones, are always available).
+func (node *tagForNode) executeSequence(
+	forCtx *ExecutionContext,
+	writer TemplateWriter,
+	loopInfo *tagForLoopInformation,
+	obj *Value,
+) (forError error) {
 	obj.IterateOrder(func(idx, count int, key, value *Value) bool {
 		// There's something to iterate over (correct type and at least 1 item)
 
@@ -116,12 +149,14 @@ func (node *tagForNode) Execute(ctx *ExecutionContext, writer TemplateWriter) (f
 		if idx+1 == count {
 			loopInfo.Last = true
 		}
-		loopInfo.Revcounter = count - idx
-		loopInfo.Revcounter0 = count - (idx + 1)
+		loopInfo.setRevcounter(count, idx)
 
 		// Render elements with updated context
 		err := node.bodyWrapper.Execute(forCtx, writer)
-		if err != nil {
+		if errors.Is(err, errLoopBreak) {
+			return false
+		}
+		if err != nil && !errors.Is(err, errLoopContinue) {
 			forError = err
 			return false
 		}
@@ -137,6 +172,97 @@ func (node *tagForNode) Execute(ctx *ExecutionContext, writer TemplateWriter) (f
 	}, node.reversed, node.sorted)
 
 	return forError
+}
+
+// executeIterator lazily consumes an Iterator. It pulls at most one item
+// ahead (to compute forloop.Last) and closes the cursor exactly once,
+// however the loop is left.
+func (node *tagForNode) executeIterator(
+	forCtx *ExecutionContext,
+	writer TemplateWriter,
+	loopInfo *tagForLoopInformation,
+	it Iterator,
+) (forError error) {
+	if node.value != "" {
+		return forCtx.Error("Key, value iteration is not supported for iterators.", nil)
+	}
+	if node.sorted {
+		return forCtx.Error("'sorted' is not supported for iterators (it would require consuming all items).", nil)
+	}
+	if node.reversed {
+		reversible, ok := it.(ReversibleIterator)
+		if !ok {
+			return forCtx.Error("'reversed' is not supported by this iterator.", nil)
+		}
+		reversed, err := reversible.Reverse()
+		if err != nil {
+			return err
+		}
+		it = reversed
+	}
+
+	// The cursor obtained by this loop is closed exactly once: on normal
+	// end, break, template errors and output writer failures alike.
+	closed := false
+	defer func() {
+		if closed {
+			return
+		}
+		closed = true
+		if err := it.Close(); err != nil && forError == nil {
+			forError = err
+		}
+	}()
+
+	// Length-dependent counters (revcounter) are only available when the
+	// iterator declares its length; the source is never drained to find out.
+	length := -1
+	if sized, ok := it.(SizedIterator); ok {
+		length = sized.Len()
+	}
+
+	item, ok, err := it.Next()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		// Empty iterator: render the empty branch (if present).
+		if node.emptyWrapper != nil {
+			return node.emptyWrapper.Execute(forCtx, writer)
+		}
+		return nil
+	}
+
+	for idx := 0; ; idx++ {
+		// Look ahead by at most one item so forloop.Last can be reported
+		// without draining the source.
+		next, hasNext, err := it.Next()
+		if err != nil {
+			return err
+		}
+
+		forCtx.Private[node.key] = asIteratorValue(item)
+		loopInfo.Counter = idx + 1
+		loopInfo.Counter0 = idx
+		loopInfo.First = idx == 0
+		loopInfo.Last = !hasNext
+		if length >= 0 {
+			loopInfo.setRevcounter(length, idx)
+		}
+
+		err = node.bodyWrapper.Execute(forCtx, writer)
+		if errors.Is(err, errLoopBreak) {
+			return nil
+		}
+		if err != nil && !errors.Is(err, errLoopContinue) {
+			return err
+		}
+
+		if !hasNext {
+			return nil
+		}
+		item = next
+	}
 }
 
 // tagForParser parses the {% for %} tag. It supports key/value iteration,

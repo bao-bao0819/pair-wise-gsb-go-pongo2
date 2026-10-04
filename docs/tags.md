@@ -82,6 +82,36 @@ Iterates over sequences.
 {% endfor %}
 ```
 
+**Loop control:**
+
+`{% break %}` stops the innermost enclosing loop, `{% continue %}` skips
+the rest of the current iteration of the innermost enclosing loop.
+
+```django
+{% for item in items %}
+  {% if item.Hidden %}{% continue %}{% endif %}
+  {% if item.Last_needed %}{% break %}{% endif %}
+  {{ item.Name }}
+{% endfor %}
+```
+
+**Lazy iteration (streaming):**
+
+If the object after `in` implements the `pongo2.Iterator` interface
+(`Next() (item any, ok bool, err error)` and `Close() error`), the loop
+consumes it lazily instead of materializing all items first. This is useful
+for large result sets (e.g. exporting records from a database):
+
+- `forloop.Last` is computed with at most one item of lookahead; the source
+  is never drained to the end.
+- `forloop.Revcounter`/`forloop.Revcounter0` stay empty unless the iterator
+  also implements `pongo2.SizedIterator` (`Len() int`).
+- `reversed` is only available if the iterator implements
+  `pongo2.ReversibleIterator` (`Reverse() (Iterator, error)`); `sorted` and
+  `for key, value in ...` are not supported for iterators.
+- The cursor is closed exactly once, no matter how the loop is left
+  (normal end, `{% break %}`, template error or writer failure).
+
 ### ifequal / endifequal
 
 Compares two values for equality. (Prefer `{% if a == b %}` instead.)

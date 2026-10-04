@@ -43,3 +43,6 @@ string unicode
 
 string unicode sorted reversed
 '{% for char in simple.chinese_hello_world reversed sorted %}{{ char }}{% endfor %}'
+
+break/continue
+'{% for item in simple.multiple_item_list %}{% if item == 2 %}{% continue %}{% endif %}{% if item == 8 %}{% break %}{% endif %}{{ item }} {% endfor %}'
