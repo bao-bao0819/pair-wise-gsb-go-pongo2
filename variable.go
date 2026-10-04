@@ -88,6 +88,7 @@ type nodeFilteredVariable struct {
 type nodeVariable struct {
 	locationToken *Token
 	expr          IEvaluator
+	escapeKind    escapeKind
 }
 
 type executionCtxEval struct{}
@@ -189,6 +190,14 @@ func (nv *nodeVariable) FilterApplied(name string) bool {
 func (nv *nodeVariable) Execute(ctx *ExecutionContext, writer TemplateWriter) error {
 	value, err := nv.expr.Evaluate(ctx)
 	if err != nil {
+		return err
+	}
+
+	if ctx.template.set.contextualEscaping {
+		// Contextual escaping always applies, ignoring the safe marker/filter
+		// and {% autoescape off %}: safety in one context (e.g. HTML text)
+		// never implies safety in another (e.g. a JS string or href).
+		_, err = writer.WriteString(contextualEscape(value.String(), nv.escapeKind))
 		return err
 	}
 

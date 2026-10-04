@@ -70,6 +70,7 @@ err := tpl.ExecuteWriter(pongo2.Context{
 - [Template Sets](template-sets.md) - Loaders, caching, globals, sandbox
 - [Custom Extensions](custom-extensions.md) - Creating filters and tags
 - [Security and Sandboxing](security-sandboxing.md) - Autoescape, sandboxing, best practices
+- [Context-Aware Escaping](contextual-escaping.md) - Opt-in HTML/attribute/URL/JS context analysis
 - [Changelog](../CHANGELOG.md) - Version history and release notes
 
 ## Differences from Django

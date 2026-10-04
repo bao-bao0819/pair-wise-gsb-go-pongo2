@@ -174,6 +174,20 @@ func newTemplate(set *TemplateSet, name string, isTplString bool, tpl []byte) (*
 		return nil, err
 	}
 
+	// Opt-in context-aware escaping: statically analyze the compiled tree so
+	// every output node gets an escaper matching its exact HTML/JS context,
+	// and reject templates whose output context cannot be proven safe.
+	if set.contextualEscaping {
+		if err := analyzeTemplate(t); err != nil {
+			return nil, err
+		}
+		if t.parent != nil {
+			if err := verifyInheritanceChain(t); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	return t, nil
 }
 

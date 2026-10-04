@@ -42,6 +42,15 @@ type TemplateSet struct {
 	// When true (default), string output will be escaped for safety.
 	autoescape bool
 
+	// contextualEscaping enables the opt-in context-aware escaping mode. When
+	// true, every variable output is escaped according to the exact HTML/JS
+	// context it appears in (HTML text, quoted attribute, quoted URL attribute
+	// or quoted JavaScript string), as determined by a compile-time analysis.
+	// Templates that place output in a context that cannot be proven safe are
+	// rejected at compile time. See docs/contextual-escaping.md for the exact
+	// support matrix. Must be enabled before compiling templates.
+	contextualEscaping bool
+
 	// Options allow you to change the behavior of template-engine.
 	// You can change the options before calling the Execute method.
 	Options *Options
@@ -199,6 +208,25 @@ func (set *TemplateSet) RegisterFilter(name string, fn FilterFunction) error {
 // RegisterFilter registers a new filter for this template set.
 func (set *TemplateSet) SetAutoescape(v bool) {
 	set.autoescape = v
+}
+
+// SetContextualEscaping enables or disables the opt-in context-aware escaping
+// mode for this template set.
+//
+// When enabled, template compilation additionally runs a static context
+// analysis: each variable output must be located in one of the supported
+// contexts (HTML text, a quoted non-URL attribute, a quoted URL attribute or a
+// quoted JavaScript string inside a <script> element). Compilation fails with
+// an error pointing at the offending template position for any output placed
+// in an unsupported context (e.g. CSS, dynamic tag/attribute names, unquoted
+// attributes, JavaScript outside a quoted string). URL attribute values are
+// additionally protocol-checked at render time regardless of any safe marker.
+//
+// The normal mode is unchanged: call this method to opt in. It must be called
+// before compiling templates of this set. See docs/contextual-escaping.md for
+// the complete list of supported and rejected constructs.
+func (set *TemplateSet) SetContextualEscaping(v bool) {
+	set.contextualEscaping = v
 }
 
 // ReplaceFilter replaces an already registered filter in this template set.

@@ -3,6 +3,7 @@ package pongo2
 type NodeWrapper struct {
 	Endtag string
 	nodes  []INode
+	start  *Token
 }
 
 func (wrapper *NodeWrapper) Execute(ctx *ExecutionContext, writer TemplateWriter) error {

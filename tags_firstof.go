@@ -28,8 +28,9 @@ package pongo2
 // Note: Output is automatically HTML-escaped when autoescape is enabled.
 // Use the |safe filter if you need unescaped output.
 type tagFirstofNode struct {
-	position *Token
-	args     []IEvaluator
+	position   *Token
+	args       []IEvaluator
+	escapeKind escapeKind
 }
 
 // Execute evaluates arguments in order and outputs the first truthy value.
@@ -42,7 +43,9 @@ func (node *tagFirstofNode) Execute(ctx *ExecutionContext, writer TemplateWriter
 		}
 
 		if val.IsTrue() {
-			if ctx.Autoescape && !arg.FilterApplied("safe") {
+			if ctx.template.set.contextualEscaping {
+				val = AsValue(contextualEscape(val.String(), node.escapeKind))
+			} else if ctx.Autoescape && !arg.FilterApplied("safe") {
 				val, err = ctx.template.set.ApplyFilter("escape", val, nil)
 				if err != nil {
 					return err

@@ -216,6 +216,7 @@ func (p *Parser) Error(msg string, token *Token) *Error {
 // It returns a parser to process provided arguments to the tag.
 func (p *Parser) WrapUntilTag(names ...string) (*NodeWrapper, *Parser, error) {
 	wrapper := &NodeWrapper{}
+	wrapper.start = p.Current()
 
 	var tagArgs []*Token
 

@@ -35,6 +35,7 @@ package pongo2
 // Note: Static filenames (strings) are parsed at compile time for better
 // performance. Dynamic filenames are resolved at runtime.
 type tagIncludeNode struct {
+	position          *Token
 	tpl               *Template
 	filenameEvaluator IEvaluator
 	lazy              bool
@@ -118,6 +119,7 @@ func tagIncludeParser(doc *Parser, start *Token, arguments *Parser) (INodeTag, e
 	includeNode := &tagIncludeNode{
 		withPairs: make(map[string]IEvaluator),
 	}
+	includeNode.position = start
 
 	if filenameToken := arguments.MatchType(TokenString); filenameToken != nil {
 		// prepared, static template

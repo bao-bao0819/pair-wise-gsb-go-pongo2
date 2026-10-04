@@ -41,7 +41,8 @@ import (
 //
 //	{% block sidebar %}...{% endblock sidebar %}
 type tagBlockNode struct {
-	name string
+	name    string
+	wrapper *NodeWrapper
 }
 
 // getBlockWrappers collects all block wrappers with the same name from the
@@ -168,7 +169,7 @@ func tagBlockParser(doc *Parser, start *Token, arguments *Parser) (INodeTag, err
 		return nil, arguments.Error(fmt.Sprintf("Block named '%s' already defined", nameToken.Val), nil)
 	}
 
-	return &tagBlockNode{name: nameToken.Val}, nil
+	return &tagBlockNode{name: nameToken.Val, wrapper: wrapper}, nil
 }
 
 func init() {

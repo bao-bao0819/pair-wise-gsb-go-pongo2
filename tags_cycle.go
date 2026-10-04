@@ -41,10 +41,28 @@ type tagCycleValue struct {
 //	{% cycle 'a' 'b' 'c' as letter silent %}
 //	Current letter: {{ letter }}
 type tagCycleNode struct {
-	position *Token
-	args     []IEvaluator
-	asName   string
-	silent   bool
+	position   *Token
+	args       []IEvaluator
+	asName     string
+	silent     bool
+	escapeKind escapeKind
+}
+
+func writeCycleValue(node *tagCycleNode, ctx *ExecutionContext, item IEvaluator, val *Value, writer TemplateWriter) error {
+	if ctx.template.set.contextualEscaping {
+		_, err := writer.WriteString(contextualEscape(val.String(), node.escapeKind))
+		return err
+	}
+	// Apply autoescape like Django's render_value_in_context
+	var err error
+	if ctx.Autoescape && !item.FilterApplied("safe") && val.IsString() {
+		val, err = ctx.template.set.ApplyFilter("escape", val, nil)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = writer.WriteString(val.String())
+	return err
 }
 
 // String returns the string representation of the current cycle value.
@@ -86,14 +104,7 @@ func (node *tagCycleNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 		t.value = val
 
 		if !t.node.silent {
-			// Apply autoescape like Django's render_value_in_context
-			if ctx.Autoescape && !item.FilterApplied("safe") && val.IsString() {
-				val, err = ctx.template.set.ApplyFilter("escape", val, nil)
-				if err != nil {
-					return err
-				}
-			}
-			if _, err := writer.WriteString(val.String()); err != nil {
+			if err := writeCycleValue(t.node, ctx, item, val, writer); err != nil {
 				return err
 			}
 		}
@@ -109,14 +120,7 @@ func (node *tagCycleNode) Execute(ctx *ExecutionContext, writer TemplateWriter) 
 			ctx.Private[node.asName] = cycleValue
 		}
 		if !node.silent {
-			// Apply autoescape like Django's render_value_in_context
-			if ctx.Autoescape && !item.FilterApplied("safe") && val.IsString() {
-				val, err = ctx.template.set.ApplyFilter("escape", val, nil)
-				if err != nil {
-					return err
-				}
-			}
-			if _, err := writer.WriteString(val.String()); err != nil {
+			if err := writeCycleValue(node, ctx, item, val, writer); err != nil {
 				return err
 			}
 		}

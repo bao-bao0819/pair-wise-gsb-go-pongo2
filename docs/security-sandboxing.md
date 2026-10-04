@@ -102,6 +102,16 @@ set.SetAutoescape(false)  // Disable for this set only
    ```
 4. **Validate and sanitize** user input before it reaches templates
 
+## Context-Aware Escaping
+
+For stricter, position-aware output handling, enable the opt-in contextual
+escaping mode with `set.SetContextualEscaping(true)`. It distinguishes HTML
+text, quoted attributes, quoted URL attributes (with protocol checks), and
+quoted JavaScript strings at compile time, follows `if`/`for`/`include`/
+`extends` structure, and rejects contexts it cannot prove safe instead of
+guessing. See [Context-Aware Escaping](contextual-escaping.md) for the
+support matrix and the list of rejected constructs.
+
 ## Sandbox Features
 
 Template sets support sandboxing to restrict what templates can do.
