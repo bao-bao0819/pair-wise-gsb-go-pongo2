@@ -110,6 +110,11 @@ type Template struct {
 	// point for template execution. Execute() calls root.Execute() to render.
 	root *nodeDocument
 
+	// transMessages holds the translation messages extracted from {% trans %}
+	// blocks while parsing. It is populated at compile time without evaluating
+	// any variable, filter or translator.
+	transMessages []TranslationMessage
+
 	// Options allow you to change the behavior of template-engine.
 	// You can change the options before calling the Execute method.
 	// Includes settings like TrimBlocks and LStripBlocks for whitespace control.
@@ -423,4 +428,33 @@ func (tpl *Template) ExecuteBlocks(context Context, blocks []string) (map[string
 	}
 
 	return result, nil
+}
+
+// TranslationMessages returns the translatable messages extracted from
+// {% trans %} blocks at compile time, walking up the inheritance chain so
+// messages defined in parent templates are included. The returned slice and
+// the Placeholders slices are copies and can be used to build translation
+// catalogs without affecting the template.
+//
+// Extraction never executes variables, filters or translators; it only reads
+// the literal singular/plural text and the declared {placeholder} names.
+func (tpl *Template) TranslationMessages() []TranslationMessage {
+	var messages []TranslationMessage
+	visited := make(map[*Template]struct{})
+	for current := tpl; current != nil; {
+		if _, seen := visited[current]; seen {
+			break
+		}
+		visited[current] = struct{}{}
+		for _, msg := range current.transMessages {
+			copied := TranslationMessage{
+				Singular:     msg.Singular,
+				Plural:       msg.Plural,
+				Placeholders: append([]string(nil), msg.Placeholders...),
+			}
+			messages = append(messages, copied)
+		}
+		current = current.parent
+	}
+	return messages
 }

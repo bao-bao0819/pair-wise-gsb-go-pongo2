@@ -97,11 +97,32 @@ Please use the [issue tracker](https://github.com/flosch/pongo2/issues) if you'r
 
 - **for**: All the `forloop` fields (like `forloop.counter`) are written with a capital letter at the beginning. For example, the `counter` can be accessed by `forloop.Counter` and the parentloop by `forloop.Parentloop`.
 - **now**: takes Go's time format (see **date** and **time**-filter).
+- **trans**: translatable block with named placeholders and an optional count; see [Translation blocks](#translation-blocks).
 
 ### Misc
 
 - **not in-operator**: You can check whether a map/struct/string contains a key/field/substring by using the in-operator (or the negation of it):
   `{% if key in map %}Key is in map{% else %}Key not in map{% endif %}` or `{% if !(key in map) %}Key is NOT in map{% else %}Key is in map{% endif %}`.
+
+## Translation blocks
+
+The `{% trans %}` block declares a translatable message with named
+`{placeholders}` and, optionally, a `count` expression followed by a
+`{% plural %}` section. Block contents are collected as literal text: template
+expressions, filters and other tags are rejected at compile time, so
+translation files can never carry executable template syntax.
+
+```django
+{% trans count = unread %}{name} has {count} message.{% plural %}{name} has {count} messages.{% endtrans %}
+```
+
+Messages are extracted at compile time (without evaluating any variable,
+filter or translator) via `(*Template).TranslationMessages()`. At render time a
+`Translator` is supplied per execution through `WithI18n`, together with the
+locale and the strategies used when translation is missing or invalid:
+`FailureStrategyError` (default), `FailureStrategyEmpty` or
+`FailureStrategySource`. Placeholder values follow the current auto-escape
+rules; translations are plain text and are never parsed as templates again.
 
 ## Add-ons, libraries and helpers
 

@@ -84,6 +84,7 @@ This release brings pongo2 significantly closer to Django template behavior.
 - Support for sorted and reversed iteration over strings.
 - Inline variable definitions (`{% set foo = "bar" %}`).
 - Expand `urlize` filter to support more TLDs.
+- **`{% trans %}` translation blocks**: literal-text blocks with named `{placeholders}` and optional `count`/`{% plural %}` sections. Messages are extracted at compile time via `(*Template).TranslationMessages()` without evaluating variables, filters or translators; rendering calls a per-execution `Translator` supplied through `WithI18n`, with caller-selected missing/invalid strategies and auto-escape-aware placeholder substitution.
 
 ### Bug Fixes
 
