@@ -37,6 +37,11 @@ type Parser struct {
 	tokens    []*Token
 	lastToken *Token
 
+	// forDepth tracks how many {% for %} bodies the document parser is
+	// currently inside of. It is used to reject {% break %}/{% continue %}
+	// outside of for loops at parse time.
+	forDepth int
+
 	// if the parser parses a template document, here will be
 	// a reference to it (needed to access the template through Tags)
 	template *Template

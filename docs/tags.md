@@ -82,6 +82,46 @@ Iterates over sequences.
 {% endfor %}
 ```
 
+**break / continue:**
+
+`{% break %}` leaves the innermost enclosing for loop, `{% continue %}`
+skips to its next iteration. Both take no arguments and are only allowed
+inside a for loop body (rejected at compile time otherwise).
+
+```django
+{% for item in items %}
+  {% if item.Hidden %}{% continue %}{% endif %}
+  {% if forloop.Counter > 100 %}{% break %}{% endif %}
+  <li>{{ item }}</li>
+{% endfor %}
+```
+
+**Lazy iterators (streaming large result sets):**
+
+Instead of a slice or map, the looped value can be a Go object implementing
+`pongo2.Iterator` (e.g. a database cursor over a mail export). The loop then
+consumes items lazily — at most one item of lookahead for `forloop.Last` —
+without materializing the whole result set first, and closes the iterator
+exactly once when the loop ends, breaks, or fails:
+
+```go
+type Iterator interface {
+    // ok == true: item is next; ok == false: end (err == nil) or failure.
+    Next() (item any, ok bool, err error)
+    Close() error // called exactly once by the loop
+}
+```
+
+Optional extensions:
+
+- `SizedIterator` (`Len() (int, bool)`): announces the total length. Without
+  it, `forloop.Revcounter`/`forloop.Revcounter0` are explicitly NIL inside
+  the loop (the engine never drains the source to compute them).
+- `ReversibleIterator` (`Reverse() (Iterator, error)`): declares support for
+  `{% for ... reversed %}`. Using `reversed` with an iterator that does not
+  implement it is an error; `sorted` and `key, value` unpacking are not
+  supported for iterators.
+
 ### ifequal / endifequal
 
 Compares two values for equality. (Prefer `{% if a == b %}` instead.)

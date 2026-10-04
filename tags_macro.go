@@ -187,7 +187,13 @@ func tagMacroParser(doc *Parser, start *Token, arguments *Parser) (INodeTag, err
 	}
 
 	// Body wrapping
+	// Macro bodies execute later, in the caller's dynamic scope, so a
+	// surrounding {% for %} loop must not make {% break %}/{% continue %}
+	// legal inside the macro definition.
+	savedForDepth := doc.forDepth
+	doc.forDepth = 0
 	wrapper, endargs, err := doc.WrapUntilTag("endmacro")
+	doc.forDepth = savedForDepth
 	if err != nil {
 		return nil, err
 	}

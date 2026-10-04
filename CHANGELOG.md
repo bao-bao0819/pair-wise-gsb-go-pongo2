@@ -4,6 +4,11 @@
 
 This release brings pongo2 significantly closer to Django template behavior.
 
+### Features
+
+- **Lazy iterators in `{% for %}`**: Values implementing the new `pongo2.Iterator` interface (`Next() (item, ok, err)` + `Close()`) are streamed item by item instead of being materialized into a slice first — ideal for large exports backed by a cursor. `forloop.Last` is computed with at most one item of lookahead; `forloop.Revcounter`/`Revcounter0` stay NIL unless the iterator announces its length via the optional `SizedIterator` interface. Reversed iteration requires the optional `ReversibleIterator` interface. The iterator is closed exactly once on normal end, `{% break %}`, template errors, and writer failures.
+- **`{% break %}` / `{% continue %}`**: New loop-control tags for the innermost enclosing `{% for %}` loop, rejected at compile time outside of loop bodies.
+
 ### Backwards-Incompatible Fixes
 
 - **`timesince`/`timeuntil`**: Rewritten to use calendar-based month/year arithmetic and Django's adjacency rule (only adjacent time units shown). Future dates return "0&nbsp;minutes" for `timesince`, past dates for `timeuntil`.
